@@ -1,2 +1,3 @@
 project: init Next.js 15 app with TypeScript and Tailwind
 project: add Supabase client and env config
+schema: define DischargeSummary interface and EMPTY_SUMMARY
