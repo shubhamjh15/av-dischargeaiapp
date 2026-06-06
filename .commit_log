@@ -3,3 +3,4 @@ project: add Supabase client and env config
 schema: define DischargeSummary interface and EMPTY_SUMMARY
 schema: add TreatmentMed and DischargeMed types
 schema: add HOSPITAL constants and mergeSummary helper
+auth: add shared password login API route
