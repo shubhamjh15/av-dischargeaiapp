@@ -8,3 +8,4 @@ auth: add middleware to gate all routes behind cookie
 login: build login page with glass card UI
 db: add supabase.sql table creation script
 api: add GET and POST /api/summaries route
+api: add GET PUT DELETE /api/summaries/[id] route
