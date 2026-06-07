@@ -11,3 +11,4 @@ api: add GET and POST /api/summaries route
 api: add GET PUT DELETE /api/summaries/[id] route
 components: add TopBar with hospital branding
 components: add FloatingBackground with animated orbs
+dashboard: build patient list with skeleton loader
