@@ -12,3 +12,4 @@ api: add GET PUT DELETE /api/summaries/[id] route
 components: add TopBar with hospital branding
 components: add FloatingBackground with animated orbs
 dashboard: build patient list with skeleton loader
+dashboard: add Refresh button and error state
