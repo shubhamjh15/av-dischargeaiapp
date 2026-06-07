@@ -14,3 +14,4 @@ components: add FloatingBackground with animated orbs
 dashboard: build patient list with skeleton loader
 dashboard: add Refresh button and error state
 forms: scaffold DischargeForm with patient section
+forms: add discharge summary body section fields
