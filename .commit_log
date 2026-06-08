@@ -17,3 +17,4 @@ forms: scaffold DischargeForm with patient section
 forms: add discharge summary body section fields
 forms: add clinical examination vitals grid
 forms: add operative note section
+components: add MedList for treatment and discharge meds
