@@ -23,3 +23,4 @@ components: add SummaryEditor with save and autofill state
 pages: add /summary/new page
 pages: add /summary/[id] edit page
 ai: integrate Groq llama-3.3-70b for extractSummary autofill
+api: add POST /api/autofill route
