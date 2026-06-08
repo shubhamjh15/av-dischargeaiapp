@@ -20,3 +20,4 @@ forms: add operative note section
 components: add MedList for treatment and discharge meds
 forms: add advice on discharge section
 components: add SummaryEditor with save and autofill state
+pages: add /summary/new page
