@@ -30,3 +30,4 @@ pdf: add discharge summary body sections with underlined labels
 pdf: add clinical examination inline vitals block
 pdf: add page 2 operative note section
 pdf: add treatment given and advice on discharge tables
+pdf: add footer with emergency contact on both pages
