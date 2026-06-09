@@ -35,3 +35,4 @@ pdf: fix Color type error with explicit tuple types
 ui: add glass morphism card styles and green shadow system
 ui: add btn-3d pill button and btn-ghost styles
 ui: add field and field-label base input styles
+design: shift brand palette to forest green and mint
