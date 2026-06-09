@@ -28,3 +28,4 @@ pdf: scaffold jsPDF two-page discharge summary generator
 pdf: add patient info grid table to page 1
 pdf: add discharge summary body sections with underlined labels
 pdf: add clinical examination inline vitals block
+pdf: add page 2 operative note section
