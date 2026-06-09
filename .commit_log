@@ -33,3 +33,4 @@ pdf: add treatment given and advice on discharge tables
 pdf: add footer with emergency contact on both pages
 pdf: fix Color type error with explicit tuple types
 ui: add glass morphism card styles and green shadow system
+ui: add btn-3d pill button and btn-ghost styles
