@@ -46,3 +46,4 @@ ai: add cleanField Groq medical transcription corrector
 api: add POST /api/clean-field route
 voice: wire FieldMic AI clean flow on every form field
 ui: add field-mic pill styles with idle listening cleaning states
+forms: wrap all Text and Area helpers with FieldMic
