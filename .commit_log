@@ -52,3 +52,4 @@ ux: disable autofill button when notes box is empty
 ux: add toast notifications for save and autofill feedback
 dashboard: add PDF download button to each summary card
 dashboard: fetch full record on demand for dashboard PDF export
+pdf: rewrite sectionLabel — label on own line, value full width
