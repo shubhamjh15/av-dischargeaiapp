@@ -49,3 +49,4 @@ ui: add field-mic pill styles with idle listening cleaning states
 forms: wrap all Text and Area helpers with FieldMic
 ux: add Try a sample button to autofill card
 ux: disable autofill button when notes box is empty
+ux: add toast notifications for save and autofill feedback
