@@ -56,3 +56,4 @@ pdf: rewrite sectionLabel — label on own line, value full width
 pdf: split clinical exam into vitals row and systems row
 pdf: add page-break guard and auto new-page on overflow
 pdf: soften table header color and add alternating row shading
+pdf: fix footer overlap — add FOOTER_H bottom margin guard
