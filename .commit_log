@@ -61,3 +61,4 @@ pdf: add doctor signature line with underline
 ux: redesign Dictation as compact pill button above textarea
 ux: remove dictation status text when idle to reduce noise
 responsive: add sm breakpoint padding to all glass cards
+responsive: fix vitals grid 2-col mobile 4-col desktop
