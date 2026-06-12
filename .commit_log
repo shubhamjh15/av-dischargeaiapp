@@ -60,3 +60,4 @@ pdf: fix footer overlap — add FOOTER_H bottom margin guard
 pdf: add doctor signature line with underline
 ux: redesign Dictation as compact pill button above textarea
 ux: remove dictation status text when idle to reduce noise
+responsive: add sm breakpoint padding to all glass cards
