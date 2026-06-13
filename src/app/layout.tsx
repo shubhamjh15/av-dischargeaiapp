@@ -14,7 +14,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <head></head>
+      <head>
+        <style>{`html { zoom: 1.15; }`}</style>
+      </head>
       <body>{children}</body>
     </html>
   );
