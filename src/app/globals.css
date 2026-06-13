@@ -181,47 +181,89 @@ body {
   display: block;
 }
 
-/* ---------- Per-field mic (bigger, accessible) ---------- */
+/* ---------- Per-field mic ---------- */
 .field-wrap {
   position: relative;
 }
+/* Input fields: pad right so text never hides under the mic button */
 .field.has-mic {
-  padding-right: 6.4rem; /* room for the labelled mic button */
+  padding-right: 5.5rem;
 }
-/* textarea: keep the mic clear of the top-right corner */
+/* Textareas: mic sits below the text, no padding needed */
 textarea.field.has-mic {
   padding-right: 0.85rem;
+  padding-bottom: 2.8rem;
 }
 
-.field-mic {
+/* The container that holds mode-toggle + mic button + interim text */
+.field-mic-wrap {
   position: absolute;
-  top: 0.3rem;
-  right: 0.3rem;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  z-index: 2;
+  /* Single-line inputs: vertically centred on the right */
+  top: 50%;
+  right: 0.35rem;
+  transform: translateY(-50%);
+}
+/* For textareas, pin to bottom-right */
+textarea.field.has-mic ~ .field-mic-wrap {
+  top: auto;
+  bottom: 0.4rem;
+  right: 0.4rem;
+  transform: none;
+}
+
+/* Mode toggle (Replace / Append) */
+.field-mic-mode {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  height: 2rem;
-  padding: 0 0.7rem 0 0.6rem;
+  gap: 0.25rem;
+  height: 1.7rem;
+  padding: 0 0.5rem;
   border-radius: 9999px;
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0.01em;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  transition: background 0.15s, color 0.15s;
+}
+.field-mic-mode[data-mode="replace"] {
+  background: #fff3cd;
+  color: #7a5a00;
+  border-color: rgba(180, 130, 0, 0.3);
+}
+.field-mic-mode[data-mode="append"] {
+  background: var(--mint-soft);
+  color: var(--green);
+  border-color: rgba(31, 111, 82, 0.28);
+}
+.field-mic-mode:hover { opacity: 0.85; }
+
+/* Main mic pill button */
+.field-mic {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 1.9rem;
+  padding: 0 0.65rem 0 0.55rem;
+  border-radius: 9999px;
+  font-size: 0.73rem;
+  font-weight: 700;
   color: var(--green);
   background: var(--mint-soft);
   border: 1px solid rgba(31, 111, 82, 0.28);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease,
-    transform 0.1s ease;
-  z-index: 2;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, transform 0.1s;
 }
-.field-mic:hover {
+.field-mic:hover:not(:disabled) {
   background: var(--mint);
   transform: translateY(-1px);
 }
-.field-mic:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(31, 111, 82, 0.25);
-}
+.field-mic:disabled { opacity: 0.6; cursor: default; }
 .field-mic[data-state="listening"] {
   background: #fde8e8;
   border-color: rgba(190, 40, 30, 0.4);
@@ -230,12 +272,18 @@ textarea.field.has-mic {
 .field-mic[data-state="cleaning"] {
   background: var(--mint-soft);
   color: var(--green);
+  cursor: default;
 }
-/* on a textarea the mic floats just inside the corner */
-textarea.field.has-mic + .field-mic {
-  top: auto;
-  bottom: 0.45rem;
-  right: 0.45rem;
+
+/* Live interim transcript shown next to mic while listening */
+.field-mic-interim {
+  font-size: 0.7rem;
+  font-style: italic;
+  color: var(--ink-3);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .field-mic-ring {
@@ -246,27 +294,17 @@ textarea.field.has-mic + .field-mic {
   animation: pulseRing 1.5s ease-out infinite;
 }
 .field-mic-spinner {
-  height: 0.85rem;
-  width: 0.85rem;
+  height: 0.82rem;
+  width: 0.82rem;
   border-radius: 9999px;
   border: 2px solid rgba(31, 111, 82, 0.3);
   border-top-color: var(--green);
   animation: spin 0.7s linear infinite;
 }
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulseRing {
-  0% {
-    transform: scale(0.92);
-    opacity: 0.7;
-  }
-  100% {
-    transform: scale(1.4);
-    opacity: 0;
-  }
+  0%   { transform: scale(0.92); opacity: 0.7; }
+  100% { transform: scale(1.4);  opacity: 0; }
 }
 
 /* ---------- Section heading ---------- */

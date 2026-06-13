@@ -1,51 +1,124 @@
 import Groq from "groq-sdk";
 import { DischargeSummary, mergeSummary } from "./schema";
 
-// Free, fast field extraction via Groq (OpenAI-compatible).
-// Takes the doctor's free-form dictation/notes and returns the structured
-// discharge summary fields. Output is always treated as a draft the operator edits.
-
 const MODEL = "llama-3.3-70b-versatile";
 
-// Per-field clean-up. Used by the mic on every field: doctor speaks naturally,
-// this fixes medical spelling, capitalization, punctuation and dictation noise,
-// and returns ONLY the corrected text for that one field. It must not invent,
-// summarize, or add clinical facts — only tidy what was actually said.
-export async function cleanField(rawText: string, label: string): Promise<string> {
+// ─── Field-level context: what each field expects ────────────────────────────
+// This is sent to Groq so it understands the FORMAT and CLINICAL CONTEXT of
+// each specific field — not just its label name.
+const FIELD_CONTEXT: Record<string, string> = {
+  // Patient block
+  name:                  "Patient full name. Capitalise each word. E.g. 'Priya Ramesh'.",
+  ip_no:                 "Hospital IP number. Format as-is, e.g. '3041/00341'.",
+  age:                   "Patient age. E.g. '42 years' or '6 months'.",
+  sex:                   "Patient sex. Must be 'Male' or 'Female'.",
+  address:               "Patient's home address. Expand dictated shorthand, fix spelling of area/locality names.",
+  date_of_admission:     "Date of hospital admission. Format as DD-Mon-YYYY, e.g. '02-Jun-2026'.",
+  date_of_discharge:     "Date of discharge. Format as DD-Mon-YYYY, e.g. '09-Jun-2026'.",
+  payment_type:          "Payment method. Either 'Cash' or the insurer name, e.g. 'Insurance (Star Health)'.",
+  admitting_consultant:  "Consulting doctor's name and qualification. E.g. 'Dr. Kavitha Srinivas, MS (OBG)'.",
+
+  // Discharge summary body
+  diagnosis:             "Primary clinical diagnosis. Use proper medical terminology, correct spelling of conditions, procedures and eponyms. Include laterality where applicable.",
+  chief_complaint:       "Patient's presenting complaint in clear clinical language. 1-2 sentences.",
+  history_of_present_illness: "Detailed narrative of the current illness. Fix medical spelling and terminology. Keep all clinical facts exactly as dictated — do not summarise or omit.",
+  past_history:          "Past medical, surgical, drug and allergy history. Use standard clinical phrasing.",
+  investigations:        "Lab and imaging results. Fix units and abbreviations: g/dL, mg/dL, cells/cumm, etc. Keep all values exactly as dictated.",
+  course_in_hospital:    "Narrative of hospital stay: admission, interventions, daily progress, response to treatment, discharge condition. Fix terminology, keep all facts.",
+
+  // Vitals
+  bp:                    "Blood pressure reading. Format as '120/80 mmHg'.",
+  hr:                    "Heart rate. Format as '88 bpm'.",
+  spo2:                  "Oxygen saturation. Format as '98% on room air' or '99% on RA'.",
+  temp:                  "Temperature. Format as 'Afebrile' or '38.2°C'.",
+  cvs:                   "Cardiovascular examination finding. E.g. 'S1 S2 heard, no murmur'.",
+  rs:                    "Respiratory system finding. E.g. 'Bilateral air entry present, clear'.",
+  pa:                    "Per abdomen / abdominal examination finding. E.g. 'Soft, non-tender, no organomegaly'.",
+
+  // Operative note
+  surgeon:               "Operating surgeon's name and qualification.",
+  anesthetist:           "Anaesthetist's name and qualification.",
+  preop_diagnosis:       "Pre-operative diagnosis. Correct medical terminology.",
+  procedure_proposed:    "Name of the surgical procedure proposed. Use standard surgical nomenclature.",
+  anesthesia_type:       "Type of anaesthesia used. E.g. 'Spinal Anaesthesia', 'General Anaesthesia'.",
+  date_of_procedure:     "Date the procedure was performed. Format as DD-Mon-YYYY.",
+  procedure_steps:       "Step-by-step operative note. Fix surgical and anatomical terminology. Keep all steps exactly as dictated.",
+
+  // Advice
+  general_advice:        "Discharge instructions for the patient. Numbered list preferred. Fix spelling and grammar, keep all points.",
+  review_note:           "Follow-up instructions: when to review, with whom, contact number.",
+  doctors_signature:     "Signing doctor's name and qualification.",
+};
+
+// Per-field clean: takes raw dictated/typed text for ONE specific field,
+// uses full field context + the current summary state for cross-field consistency,
+// and returns medically corrected, properly formatted text.
+export async function cleanField(
+  rawText: string,
+  fieldKey: string,
+  label: string,
+  currentSummary?: Partial<DischargeSummary>
+): Promise<string> {
   const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) return rawText; // no key -> return as-is, never block the doctor
+  if (!apiKey) return rawText;
+
   const groq = new Groq({ apiKey });
+  const fieldGuide = FIELD_CONTEXT[fieldKey] ?? `A field labelled "${label}" in a hospital discharge summary.`;
+
+  // Build cross-field context so Groq can ensure consistency
+  // (e.g. drug names already used in treatment should match in discharge meds)
+  let crossContext = "";
+  if (currentSummary) {
+    const parts: string[] = [];
+    if (currentSummary.name)      parts.push(`Patient: ${currentSummary.name}`);
+    if (currentSummary.diagnosis) parts.push(`Diagnosis: ${currentSummary.diagnosis}`);
+    if (currentSummary.admitting_consultant) parts.push(`Consultant: ${currentSummary.admitting_consultant}`);
+    if (currentSummary.surgeon)   parts.push(`Surgeon: ${currentSummary.surgeon}`);
+    if (currentSummary.treatment_given?.length) {
+      const drugs = currentSummary.treatment_given.map(m => m.drug).filter(Boolean).join(", ");
+      if (drugs) parts.push(`Treatment drugs already recorded: ${drugs}`);
+    }
+    if (parts.length) crossContext = `\nContext from other fields:\n${parts.join("\n")}`;
+  }
 
   const completion = await groq.chat.completions.create({
     model: MODEL,
     temperature: 0,
-    max_tokens: 400,
+    max_tokens: 600,
     messages: [
       {
         role: "system",
         content:
-          "You are a medical transcription corrector for a hospital discharge summary. " +
-          "You are given the raw text a doctor typed or dictated for ONE field. " +
-          "Return a cleaned version of that text and NOTHING ELSE (no quotes, no labels, no explanation). " +
-          "Rules:\n" +
-          "- Fix spelling of drugs, diagnoses and medical terms (e.g. 'monosef'->'Monocef', 'humorus'->'humerus').\n" +
-          "- Fix capitalization, punctuation and spacing. Expand obvious dictation: 'one zero one'->'1-0-1'.\n" +
-          "- Keep it concise and clinical. Do NOT add facts, do NOT invent values, do NOT summarize away detail.\n" +
-          "- If the text is already fine, return it unchanged.\n" +
-          "- Never refuse; if unsure, return the input text corrected only for obvious errors.",
+          "You are a senior medical transcription editor for an Indian hospital discharge summary system.\n" +
+          "You are given raw text (dictated or typed) for ONE specific field. Your job:\n" +
+          "1. Fix ALL medical spelling errors (drug names, diagnoses, anatomical terms, procedures).\n" +
+          "2. Fix capitalization: drug names get Title Case (Inj. Monocef, Tab. Paracetamol), diagnoses get proper case.\n" +
+          "3. Fix punctuation and spacing.\n" +
+          "4. Expand dictation shorthand: 'one zero one' → '1-0-1', 'BP 130 by 80' → '130/80 mmHg', 'percent' → '%'.\n" +
+          "5. Apply the field-specific format described below.\n" +
+          "6. Use the cross-field context to ensure consistency (e.g. same doctor name spelling, same drug names).\n" +
+          "CRITICAL RULES:\n" +
+          "- Return ONLY the corrected text. No quotes, no labels, no explanation, no preamble.\n" +
+          "- Do NOT invent, add, or remove any clinical facts. Only fix form, not content.\n" +
+          "- If the text is already correct, return it exactly as-is.\n" +
+          "- Never refuse. Always return something.",
       },
       {
         role: "user",
-        content: `Field: ${label}\nRaw text: ${rawText}`,
+        content:
+          `Field: ${label}\n` +
+          `Field format guide: ${fieldGuide}\n` +
+          `${crossContext}\n` +
+          `Raw text to correct:\n${rawText}`,
       },
     ],
   });
 
   const out = completion.choices[0]?.message?.content?.trim() ?? rawText;
-  // strip wrapping quotes a model sometimes adds
-  return out.replace(/^["'""]+|["'""]+$/g, "").trim() || rawText;
+  return out.replace(/^["'""«»]+|["'""«»]+$/g, "").trim() || rawText;
 }
 
+// ─── Global autofill ─────────────────────────────────────────────────────────
 const FIELD_GUIDE = `Return a JSON object with EXACTLY these keys (use "" when not mentioned):
 name, ip_no, age, sex, address, date_of_admission, date_of_discharge, payment_type, admitting_consultant,
 diagnosis, chief_complaint, history_of_present_illness, past_history, investigations, course_in_hospital,
@@ -56,21 +129,19 @@ treatment_given (array of objects: {drug, dose, route, frequency}),
 discharge_meds (array of objects: {drug, dosage_pattern, duration}).
 
 Rules:
-- This is a hospital discharge summary. Preserve medical terms, drug names, dosages exactly as dictated.
-- "1-0-1" style frequency means morning-afternoon-night; keep that format.
-- payment_type is "Cash" or "Insurance".
+- Preserve all medical terms, drug names, dosages exactly as dictated but fix obvious spelling errors.
+- "one zero one" style dictation → "1-0-1". "BP 130 by 80" → "130/80 mmHg".
+- payment_type is "Cash" or the insurer name.
 - Do NOT invent facts. If something was not said, leave it as "".
-- For medications, split each into its parts. Example dictation "Inj Monocef 1gm IV one zero one"
-  -> {drug:"Inj. Monocef 1gm", dose:"1gm", route:"IV", frequency:"1-0-1"}.
+- Medications: split each into parts. "Inj Monocef 1gm IV one zero one" → {drug:"Inj. Monocef 1gm", dose:"1gm", route:"IV", frequency:"1-0-1"}.
+- Dates: format as DD-Mon-YYYY.
 - Return ONLY the JSON object, nothing else.`;
 
 export async function extractSummary(rawText: string): Promise<DischargeSummary> {
   const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    throw new Error("GROQ_API_KEY missing.");
-  }
-  const groq = new Groq({ apiKey });
+  if (!apiKey) throw new Error("GROQ_API_KEY missing.");
 
+  const groq = new Groq({ apiKey });
   const completion = await groq.chat.completions.create({
     model: MODEL,
     temperature: 0.1,
@@ -79,7 +150,7 @@ export async function extractSummary(rawText: string): Promise<DischargeSummary>
       {
         role: "system",
         content:
-          "You convert a doctor's free-form discharge dictation into structured JSON fields for a hospital discharge summary. " +
+          "You convert a doctor's free-form discharge dictation into structured JSON fields for an Indian hospital discharge summary. " +
           FIELD_GUIDE,
       },
       {
@@ -91,10 +162,6 @@ export async function extractSummary(rawText: string): Promise<DischargeSummary>
 
   const content = completion.choices[0]?.message?.content ?? "{}";
   let parsed: Partial<DischargeSummary> = {};
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    parsed = {};
-  }
+  try { parsed = JSON.parse(content); } catch { parsed = {}; }
   return mergeSummary(parsed);
 }
