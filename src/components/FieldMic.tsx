@@ -32,7 +32,7 @@ function getRecognition(): ISpeechRecognition | null {
   return Ctor ? new Ctor() : null;
 }
 
-type MicState = "idle" | "listening" | "cleaning";
+type MicState = "idle" | "listening" | "cleaning" | "done";
 
 interface Props {
   fieldKey: string;               // schema key, e.g. "diagnosis"
@@ -46,8 +46,10 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
   const [micState, setMicState] = useState<MicState>("idle");
   const [supported, setSupported] = useState(true);
   const [interim, setInterim]   = useState("");
-  // Whether we'll REPLACE the field value or APPEND to it
   const [mode, setMode]         = useState<"replace" | "append">("replace");
+  // For the before→after correction preview
+  const [rawSnap, setRawSnap]   = useState("");   // what was dictated (raw)
+  const [cleanSnap, setCleanSnap] = useState(""); // what AI returned
 
   const recRef      = useRef<ISpeechRecognition | null>(null);
   const dictatedRef = useRef("");   // text captured this session
@@ -89,14 +91,15 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     dictatedRef.current = "";
     if (!dictated) { setMicState("idle"); return; }
 
-    // Build the text we'll send: replace or append
     const existing = valueRef.current.trim();
     const textToClean = mode === "replace" || !existing
       ? dictated
       : `${existing} ${dictated}`;
 
-    // Optimistic: show raw immediately so nothing is lost
+    // Show raw immediately — never lose dictated text
     onChange(textToClean);
+    setRawSnap(dictated);   // show what was spoken
+    setCleanSnap("");
     setMicState("cleaning");
 
     try {
@@ -104,26 +107,30 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
       const res = await fetch("/api/clean-field", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: textToClean,
-          fieldKey,
-          label,
-          currentSummary,
-        }),
+        body: JSON.stringify({ text: textToClean, fieldKey, label, currentSummary }),
       });
       const data = await res.json();
-      if (data?.text) onChange(data.text);
+      if (data?.text) {
+        onChange(data.text);
+        setCleanSnap(data.text);
+      }
     } catch {
-      // keep the optimistic raw text
+      // keep raw
     } finally {
-      setMicState("idle");
+      setMicState("done");
+      // Clear the preview after 4 seconds
+      setTimeout(() => {
+        setMicState("idle");
+        setRawSnap("");
+        setCleanSnap("");
+      }, 4000);
     }
   }
 
   function toggle(e: React.MouseEvent) {
     e.preventDefault();
     const rec = recRef.current;
-    if (!rec || micState === "cleaning") return;
+    if (!rec || micState === "cleaning" || micState === "done") return;
 
     if (micState === "listening") {
       rec.stop();
@@ -176,20 +183,25 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
       <button
         type="button"
         onClick={toggle}
-        disabled={micState === "cleaning"}
+        disabled={micState === "cleaning" || micState === "done"}
         title={
           micState === "listening" ? "Stop — AI will correct"
           : micState === "cleaning" ? "Correcting with AI…"
+          : micState === "done" ? "Done"
           : `Dictate (${mode})`
         }
         aria-label="Dictate into this field"
         className="field-mic"
-        data-state={micState}
+        data-state={micState === "done" ? "idle" : micState}
       >
         {micState === "listening" && <span className="field-mic-ring" />}
 
         {micState === "cleaning" ? (
           <span className="field-mic-spinner" />
+        ) : micState === "done" ? (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="relative" style={{color:"var(--green)"}}>
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
         ) : micState === "listening" ? (
           <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" className="relative">
             <rect x="2" y="2" width="8" height="8" rx="1.5" />
@@ -205,13 +217,30 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
         <span className="relative">
           {micState === "cleaning" ? "AI…"
            : micState === "listening" ? "Stop"
+           : micState === "done" ? "Done"
            : "Speak"}
         </span>
       </button>
 
-      {/* Live interim transcript */}
+      {/* Live interim while listening */}
       {micState === "listening" && interim && (
         <span className="field-mic-interim">&ldquo;{interim}&rdquo;</span>
+      )}
+
+      {/* Before → After preview bubble (shown for 4s after AI corrects) */}
+      {micState === "done" && rawSnap && (
+        <div className="field-mic-preview">
+          <div className="field-mic-preview-row">
+            <span className="field-mic-preview-label heard">Heard</span>
+            <span className="field-mic-preview-text raw">{rawSnap}</span>
+          </div>
+          {cleanSnap && cleanSnap !== rawSnap && (
+            <div className="field-mic-preview-row">
+              <span className="field-mic-preview-label fixed">Fixed</span>
+              <span className="field-mic-preview-text clean">{cleanSnap}</span>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

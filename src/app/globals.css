@@ -286,6 +286,59 @@ textarea.field.has-mic ~ .field-mic-wrap {
   white-space: nowrap;
 }
 
+/* Before → After correction preview bubble */
+.field-mic-preview {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px -8px rgba(19, 61, 47, 0.25);
+  padding: 0.55rem 0.75rem;
+  min-width: 220px;
+  max-width: 320px;
+  animation: fadeSlideIn 0.18s ease;
+}
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.field-mic-preview-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+.field-mic-preview-row:last-child { margin-bottom: 0; }
+.field-mic-preview-label {
+  font-size: 0.63rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  white-space: nowrap;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+.field-mic-preview-label.heard {
+  background: #fef3c7;
+  color: #92400e;
+}
+.field-mic-preview-label.fixed {
+  background: var(--mint-soft);
+  color: var(--green);
+}
+.field-mic-preview-text {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+.field-mic-preview-text.raw  { text-decoration: line-through; color: var(--ink-3); }
+.field-mic-preview-text.clean { color: var(--ink); font-weight: 600; }
+
 .field-mic-ring {
   position: absolute;
   inset: 0;
