@@ -1,42 +1,95 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DischargeSummary, EMPTY_SUMMARY, mergeSummary } from "@/lib/schema";
 import { downloadPdf } from "@/lib/pdf";
 import DischargeForm from "./DischargeForm";
 import Dictation from "./Dictation";
+import SectionNav from "./SectionNav";
 
 interface Props {
-  // when editing an existing record
   id?: string;
   initial?: DischargeSummary;
 }
 
+// Count non-empty scalar fields + non-empty array rows
+function countFilled(s: DischargeSummary): { filled: number; total: number } {
+  const scalarKeys: (keyof DischargeSummary)[] = [
+    "name", "ip_no", "age", "sex", "address", "date_of_admission",
+    "date_of_discharge", "payment_type", "admitting_consultant",
+    "diagnosis", "chief_complaint", "history_of_present_illness",
+    "past_history", "investigations", "course_in_hospital",
+    "bp", "hr", "spo2", "temp", "cvs", "rs", "pa",
+    "surgeon", "anesthetist", "preop_diagnosis", "procedure_proposed",
+    "anesthesia_type", "date_of_procedure", "procedure_steps",
+    "general_advice", "review_note", "doctors_signature",
+  ];
+  const filled = scalarKeys.filter((k) => String(s[k] ?? "").trim() !== "").length
+    + (s.treatment_given.length > 0 ? 1 : 0)
+    + (s.discharge_meds.length > 0 ? 1 : 0);
+  return { filled, total: scalarKeys.length + 2 };
+}
+
 export default function SummaryEditor({ id, initial }: Props) {
   const router = useRouter();
-  const [summary, setSummary] = useState<DischargeSummary>(
-    initial ?? EMPTY_SUMMARY
-  );
+  const [summary, setSummary] = useState<DischargeSummary>(initial ?? EMPTY_SUMMARY);
   const [raw, setRaw] = useState("");
   const [autofilling, setAutofilling] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(
-    null
-  );
+  const [toast, setToast] = useState<{ kind: "ok" | "err" | "info"; msg: string } | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [savedOnce, setSavedOnce] = useState(!!id);
 
-  function flash(kind: "ok" | "err", msg: string) {
+  // Track dirty state whenever summary changes
+  const initialRef = useRef<DischargeSummary>(initial ?? EMPTY_SUMMARY);
+  useEffect(() => {
+    setDirty(JSON.stringify(summary) !== JSON.stringify(initialRef.current));
+  }, [summary]);
+
+  // Warn on browser navigation away with unsaved changes
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (dirty && !savedOnce) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty, savedOnce]);
+
+  // Ctrl+S / Cmd+S to save
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (!saving) save();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saving]);
+
+  function flash(kind: "ok" | "err" | "info", msg: string, duration = 4000) {
     setToast({ kind, msg });
-    setTimeout(() => setToast(null), 3500);
+    setTimeout(() => setToast(null), duration);
+  }
+
+  function handleChange(next: DischargeSummary) {
+    setSummary(next);
+    setSavedOnce(false);
   }
 
   async function autofill() {
     if (!raw.trim()) {
-      flash("err", "Dictate or type some notes first.");
+      flash("err", "Type or dictate some notes first.");
       return;
     }
     setAutofilling(true);
     try {
+      const prevFilled = countFilled(summary).filled;
       const res = await fetch("/api/autofill", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -44,10 +97,21 @@ export default function SummaryEditor({ id, initial }: Props) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Auto-fill failed.");
-      // Merge AI output over current (so re-running adds, doesn't wipe edits with blanks)
       const filled = mergeSummary(data.summary);
-      setSummary((prev) => smartMerge(prev, filled));
-      flash("ok", "Fields auto-filled from your dictation. Please review.");
+      const merged = smartMerge(summary, filled);
+      setSummary(merged);
+      setSavedOnce(false);
+      const nowFilled = countFilled(merged).filled;
+      const delta = nowFilled - prevFilled;
+      flash(
+        "ok",
+        delta > 0
+          ? `${delta} field${delta === 1 ? "" : "s"} filled — review and correct if needed`
+          : "Fields updated — no new fields detected in the text",
+        5000
+      );
+      // Scroll to top of form so user sees the filled fields
+      document.getElementById("sec-patient")?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e) {
       flash("err", (e as Error).message);
     } finally {
@@ -68,7 +132,10 @@ export default function SummaryEditor({ id, initial }: Props) {
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Save failed.");
-      flash("ok", "Saved.");
+      initialRef.current = summary;
+      setDirty(false);
+      setSavedOnce(true);
+      flash("ok", id ? "Updated successfully." : "Saved successfully.");
       if (!id && data.id) {
         router.push(`/summary/${data.id}`);
         router.refresh();
@@ -80,11 +147,13 @@ export default function SummaryEditor({ id, initial }: Props) {
     }
   }
 
+  const { filled, total } = countFilled(summary);
+  const pct = Math.round((filled / total) * 100);
+
   return (
     <div className="mx-auto mt-6 max-w-4xl px-4 pb-28 sm:px-5">
       {/* Voice + AI card */}
       <div className="glass-strong rounded-2xl p-4 sm:p-6 animate-fade-up">
-        {/* Header row */}
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-base font-bold text-[var(--ink)] sm:text-lg">
@@ -109,10 +178,8 @@ export default function SummaryEditor({ id, initial }: Props) {
           )}
         </div>
 
-        {/* Dictate button */}
         <Dictation onAppend={(t) => setRaw((p) => (p + t).trimStart())} />
 
-        {/* Notes textarea */}
         <textarea
           className="field mt-3 w-full resize-y"
           rows={4}
@@ -121,7 +188,6 @@ export default function SummaryEditor({ id, initial }: Props) {
           onChange={(e) => setRaw(e.target.value)}
         />
 
-        {/* Actions */}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             onClick={autofill}
@@ -142,17 +208,42 @@ export default function SummaryEditor({ id, initial }: Props) {
         </div>
       </div>
 
+      {/* Section jump nav */}
+      <div className="mt-4">
+        <SectionNav />
+      </div>
+
       {/* The structured form */}
-      <div className="mt-6">
-        <DischargeForm value={summary} onChange={setSummary} />
+      <div>
+        <DischargeForm value={summary} onChange={handleChange} />
       </div>
 
       {/* Sticky action bar */}
       <div className="fixed inset-x-0 bottom-0 z-20 px-3 pb-3 sm:px-0 sm:pb-0">
-        <div className="glass-strong mx-auto flex max-w-4xl items-center justify-between gap-2 rounded-2xl px-4 py-3 sm:mb-4 sm:px-5">
+        <div className="glass-strong mx-auto flex max-w-4xl items-center gap-3 rounded-2xl px-4 py-3 sm:mb-4 sm:px-5">
+
+          {/* Progress pill */}
+          <div className="flex items-center gap-2 mr-auto min-w-0">
+            <div className="relative h-2 w-24 overflow-hidden rounded-full bg-[var(--line)] sm:w-32">
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bg-[var(--green)] transition-all duration-500"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <span className="whitespace-nowrap text-xs font-semibold text-[var(--ink-3)]">
+              {filled}/{total}
+            </span>
+            {dirty && !savedOnce && (
+              <span className="hidden items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 sm:flex">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+                Unsaved
+              </span>
+            )}
+          </div>
+
           <button
             onClick={() => downloadPdf(summary)}
-            className="btn-ghost inline-flex items-center gap-2 px-4 py-2 text-sm sm:px-5 sm:py-2.5"
+            className="btn-ghost inline-flex shrink-0 items-center gap-2 px-3 py-2 text-sm sm:px-5 sm:py-2.5"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -161,28 +252,36 @@ export default function SummaryEditor({ id, initial }: Props) {
             </svg>
             <span className="hidden sm:inline">Download</span> PDF
           </button>
+
           <button
             onClick={save}
             disabled={saving}
-            className="btn-3d inline-flex items-center gap-2 px-5 py-2 text-sm sm:px-7 sm:py-2.5"
+            className="btn-3d inline-flex shrink-0 items-center gap-2 px-5 py-2 text-sm sm:px-7 sm:py-2.5"
           >
             {saving ? (
-              <>
-                <Spinner /> Saving&hellip;
-              </>
+              <><Spinner /> Saving&hellip;</>
             ) : (
-              <>💾 {id ? "Update" : "Save"} summary</>
+              <>{id ? "Update" : "Save"} summary</>
             )}
           </button>
         </div>
       </div>
 
-      {/* Toast */}
+      {/* Toast — center top, big enough to see */}
       {toast && (
         <div
-          className={`fixed left-1/2 top-6 z-30 -translate-x-1/2 rounded-xl px-5 py-3 text-sm font-semibold text-white shadow-lg ${
-            toast.kind === "ok" ? "bg-[var(--green)]" : "bg-red-500"
-          }`}
+          role="alert"
+          className="fixed left-1/2 top-5 z-30 -translate-x-1/2 animate-fade-up rounded-2xl px-5 py-3 text-sm font-semibold text-white shadow-2xl"
+          style={{
+            background:
+              toast.kind === "ok"
+                ? "var(--green)"
+                : toast.kind === "info"
+                ? "#1e40af"
+                : "#dc2626",
+            maxWidth: "calc(100vw - 2rem)",
+            boxShadow: "0 8px 32px -8px rgba(0,0,0,0.35)",
+          }}
         >
           {toast.msg}
         </div>
@@ -191,11 +290,7 @@ export default function SummaryEditor({ id, initial }: Props) {
   );
 }
 
-// Prefer AI values where non-empty; keep prior values otherwise.
-function smartMerge(
-  prev: DischargeSummary,
-  next: DischargeSummary
-): DischargeSummary {
+function smartMerge(prev: DischargeSummary, next: DischargeSummary): DischargeSummary {
   const out = { ...prev };
   (Object.keys(next) as (keyof DischargeSummary)[]).forEach((k) => {
     const val = next[k];
@@ -209,7 +304,5 @@ function smartMerge(
 }
 
 function Spinner() {
-  return (
-    <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-  );
+  return <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />;
 }

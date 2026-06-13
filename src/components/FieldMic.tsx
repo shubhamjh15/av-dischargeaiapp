@@ -40,6 +40,7 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
   const [interim, setInterim]     = useState("");
   const [rawSnap, setRawSnap]     = useState("");
   const [cleanSnap, setCleanSnap] = useState("");
+  const [aiError, setAiError]     = useState(false);
 
   const btnRef      = useRef<HTMLButtonElement>(null);
   const [bubblePos, setBubblePos] = useState<{ top: number; left: number } | null>(null);
@@ -94,6 +95,7 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     onChange(textToClean);
     setRawSnap(dictated);
     setCleanSnap("");
+    setAiError(false);
     setMicState("cleaning");
 
     try {
@@ -107,14 +109,17 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
           currentSummary: getSummary ? getSummary() : undefined,
         }),
       });
+      if (!res.ok) throw new Error("api-error");
       const data = await res.json();
       if (data?.text) { onChange(data.text); setCleanSnap(data.text); }
-    } catch { /* keep raw */ }
+    } catch {
+      setAiError(true);
+    }
     finally {
       setMicState("done");
       setTimeout(() => {
         setMicState("idle");
-        setRawSnap(""); setCleanSnap(""); setBubblePos(null);
+        setRawSnap(""); setCleanSnap(""); setAiError(false); setBubblePos(null);
       }, 5000);
     }
   }
@@ -198,22 +203,33 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
       {micState === "done" && rawSnap && (
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1f6f52" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "#1f6f52", letterSpacing: "0.04em", textTransform: "uppercase" }}>
-              Done
+            {aiError ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b45309" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1f6f52" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            )}
+            <span style={{ fontSize: 12, fontWeight: 700, color: aiError ? "#b45309" : "#1f6f52", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              {aiError ? "AI Unavailable" : "Done"}
             </span>
           </div>
 
           {/* You said */}
-          <div style={{ background: "#fff5f5", borderRadius: 8, padding: "8px 10px", marginBottom: 6 }}>
-            <span style={{ fontSize: 10, fontWeight: 800, color: "#b42318", textTransform: "uppercase", letterSpacing: "0.05em" }}>You said</span>
-            <p style={{ margin: "4px 0 0", fontSize: 12, color: "#7a3030", fontStyle: "italic", lineHeight: 1.5, textDecoration: "line-through" }}>{rawSnap}</p>
+          <div style={{ background: aiError ? "#fffbeb" : "#fff5f5", borderRadius: 8, padding: "8px 10px", marginBottom: 6 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, color: aiError ? "#92400e" : "#b42318", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              {aiError ? "Saved as spoken" : "You said"}
+            </span>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: aiError ? "#5a4a2a" : "#7a3030", fontStyle: "italic", lineHeight: 1.5, textDecoration: aiError ? "none" : "line-through" }}>{rawSnap}</p>
+            {aiError && (
+              <p style={{ margin: "6px 0 0", fontSize: 11, color: "#92400e" }}>AI correction failed — your text was saved as-is. You can edit manually.</p>
+            )}
           </div>
 
-          {/* AI fixed */}
-          {cleanSnap && cleanSnap !== rawSnap ? (
+          {/* AI fixed (only when successful) */}
+          {!aiError && (cleanSnap && cleanSnap !== rawSnap ? (
             <div style={{ background: "#f0faf4", borderRadius: 8, padding: "8px 10px" }}>
               <span style={{ fontSize: 10, fontWeight: 800, color: "#1f6f52", textTransform: "uppercase", letterSpacing: "0.05em" }}>AI fixed</span>
               <p style={{ margin: "4px 0 0", fontSize: 13, color: "#16241d", fontWeight: 600, lineHeight: 1.5 }}>{cleanSnap}</p>
@@ -223,7 +239,7 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
               <span style={{ fontSize: 10, fontWeight: 800, color: "#1f6f52", textTransform: "uppercase", letterSpacing: "0.05em" }}>AI</span>
               <p style={{ margin: "4px 0 0", fontSize: 12, color: "#475a52" }}>Text looks correct — no changes needed.</p>
             </div>
-          )}
+          ))}
         </div>
       )}
 

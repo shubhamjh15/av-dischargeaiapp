@@ -18,7 +18,7 @@ export default function DischargeForm({ value, onChange }: Props) {
 
   return (
     <div className="space-y-6">
-      <Section title="Patient & Admission" icon="🧾">
+      <Section id="sec-patient" title="Patient & Admission" icon="🧾">
         <Grid>
           <Text fieldKey="name"                 label="Patient Name"         v={value.name}                 on={(x) => set("name", x)}                 gs={getSummary} />
           <Text fieldKey="ip_no"                label="IP No"                v={value.ip_no}                on={(x) => set("ip_no", x)}                gs={getSummary} />
@@ -32,7 +32,7 @@ export default function DischargeForm({ value, onChange }: Props) {
         <Area fieldKey="address" label="Address" v={value.address} on={(x) => set("address", x)} rows={2} gs={getSummary} />
       </Section>
 
-      <Section title="Discharge Summary" icon="📋">
+      <Section id="sec-summary" title="Discharge Summary" icon="📋">
         <Area fieldKey="diagnosis"                    label="Diagnosis"                      v={value.diagnosis}                    on={(x) => set("diagnosis", x)}                    gs={getSummary} />
         <Area fieldKey="chief_complaint"              label="Chief Complaint"                v={value.chief_complaint}              on={(x) => set("chief_complaint", x)}              gs={getSummary} />
         <Area fieldKey="history_of_present_illness"   label="History of Present Illness"    v={value.history_of_present_illness}   on={(x) => set("history_of_present_illness", x)}   gs={getSummary} rows={4} />
@@ -41,7 +41,7 @@ export default function DischargeForm({ value, onChange }: Props) {
         <Area fieldKey="course_in_hospital"           label="Course in the Hospital"        v={value.course_in_hospital}           on={(x) => set("course_in_hospital", x)}           gs={getSummary} rows={4} />
       </Section>
 
-      <Section title="Clinical Examination" icon="🩺">
+      <Section id="sec-clinical" title="Clinical Examination" icon="🩺">
         <Grid cols={4}>
           <Text fieldKey="bp"   label="BP"   v={value.bp}   on={(x) => set("bp", x)}   gs={getSummary} />
           <Text fieldKey="hr"   label="HR"   v={value.hr}   on={(x) => set("hr", x)}   gs={getSummary} />
@@ -53,7 +53,7 @@ export default function DischargeForm({ value, onChange }: Props) {
         </Grid>
       </Section>
 
-      <Section title="Operative Note" icon="🔬" subtitle="Fill when surgery was performed">
+      <Section id="sec-operative" title="Operative Note" icon="🔬" subtitle="Fill when surgery was performed">
         <Grid>
           <Text fieldKey="surgeon"          label="Surgeon"            v={value.surgeon}          on={(x) => set("surgeon", x)}          gs={getSummary} />
           <Text fieldKey="anesthetist"      label="Anesthetist"        v={value.anesthetist}      on={(x) => set("anesthetist", x)}      gs={getSummary} />
@@ -65,7 +65,7 @@ export default function DischargeForm({ value, onChange }: Props) {
         <Area fieldKey="procedure_steps"   label="Procedure (steps)"               v={value.procedure_steps}   on={(x) => set("procedure_steps", x)}   gs={getSummary} rows={5} />
       </Section>
 
-      <Section title="Treatment Given" icon="💉" subtitle="In-hospital medications">
+      <Section id="sec-treatment" title="Treatment Given" icon="💉" subtitle="In-hospital medications">
         <MedList
           variant="treatment"
           treatment={value.treatment_given}
@@ -73,7 +73,7 @@ export default function DischargeForm({ value, onChange }: Props) {
         />
       </Section>
 
-      <Section title="Advice on Discharge" icon="💊" subtitle="Take-home medications">
+      <Section id="sec-advice" title="Advice on Discharge" icon="💊" subtitle="Take-home medications">
         <MedList
           variant="discharge"
           discharge={value.discharge_meds}
@@ -91,11 +91,11 @@ export default function DischargeForm({ value, onChange }: Props) {
 
 /* ── helpers ── */
 
-function Section({ title, icon, subtitle, children }: {
-  title: string; icon: string; subtitle?: string; children: React.ReactNode;
+function Section({ id, title, icon, subtitle, children }: {
+  id?: string; title: string; icon: string; subtitle?: string; children: React.ReactNode;
 }) {
   return (
-    <section className="glass rounded-2xl p-4 sm:p-6 animate-fade-up">
+    <section id={id} className="glass rounded-2xl p-4 sm:p-6 animate-fade-up scroll-mt-24">
       <div className="mb-4 flex items-center gap-3">
         <div
           className="flex h-10 w-10 items-center justify-center rounded-xl text-lg"
