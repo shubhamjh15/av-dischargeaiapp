@@ -14,12 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <head>
-        {/* Scale the whole UI to 85% — keeps layout intact, just smaller */}
-        <style>{`
-          html { zoom: 0.85; }
-        `}</style>
-      </head>
+      <head></head>
       <body>{children}</body>
     </html>
   );
