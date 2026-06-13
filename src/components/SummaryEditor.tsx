@@ -6,7 +6,7 @@ import { DischargeSummary, EMPTY_SUMMARY, mergeSummary } from "@/lib/schema";
 import { downloadPdf } from "@/lib/pdf";
 import DischargeForm from "./DischargeForm";
 import Dictation from "./Dictation";
-import SectionNav from "./SectionNav";
+
 
 interface Props {
   id?: string;
@@ -206,11 +206,6 @@ export default function SummaryEditor({ id, initial }: Props) {
             </button>
           )}
         </div>
-      </div>
-
-      {/* Section jump nav */}
-      <div className="mt-4">
-        <SectionNav />
       </div>
 
       {/* The structured form */}
