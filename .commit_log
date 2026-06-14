@@ -65,3 +65,4 @@ responsive: fix vitals grid 2-col mobile 4-col desktop
 responsive: make sticky action bar mobile safe with proper padding
 responsive: make autofill card header wrap on small screens
 chore: tighten tailwind config brand and mint color scales
+chore: final pre-deploy cleanup and build verification
