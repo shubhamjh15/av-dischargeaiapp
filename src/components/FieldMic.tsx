@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { DischargeSummary } from "@/lib/schema";
 import { registerActiveMic, unregisterActiveMic } from "@/lib/micRegistry";
 
@@ -45,9 +44,6 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
   const [rawSnap, setRawSnap]     = useState("");
   const [cleanSnap, setCleanSnap] = useState("");
   const [aiError, setAiError]     = useState(false);
-
-  const btnRef      = useRef<HTMLButtonElement>(null);
-  const [bubblePos, setBubblePos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const recRef        = useRef<ISpeechRecognition | null>(null);
   const dictatedRef   = useRef("");     // accumulates all final transcripts this session
@@ -106,25 +102,6 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Bubble position — compute ONCE when the bubble opens (idle→active), not on every
-  // transcript word. getBoundingClientRect() forces layout reflow, so calling it on
-  // each interim update was a real per-word jank source.
-  useEffect(() => {
-    if (micState !== "idle") {
-      if (!bubblePos && btnRef.current) {
-        const r = btnRef.current.getBoundingClientRect();
-        const bubbleW = Math.min(320, window.innerWidth - 16);
-        const left = Math.min(
-          Math.max(8, r.right + window.scrollX - bubbleW),
-          window.innerWidth + window.scrollX - bubbleW - 8
-        );
-        setBubblePos({ top: r.bottom + window.scrollY + 8, left, width: bubbleW });
-      }
-    } else if (bubblePos) {
-      setBubblePos(null);
-    }
-  }, [micState, bubblePos]);
-
   function clearSilenceTimer() {
     if (silenceTimer.current) { clearTimeout(silenceTimer.current); silenceTimer.current = null; }
   }
@@ -138,7 +115,7 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
 
   function resetBubble() {
     setMicState("idle"); setRawSnap(""); setCleanSnap(""); setAiError(false);
-    setLiveText(""); setInterim(""); setBubblePos(null);
+    setLiveText(""); setInterim("");
   }
 
   function hardReset() {
@@ -226,12 +203,14 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
 
   const shownText = (liveText + (interim ? " " + interim : "")).trim();
 
-  const bubble = bubblePos ? createPortal(
+  // Bubble is rendered INLINE inside the wrap (position:absolute, anchored to the button).
+  // This is immune to page zoom and scroll — it always sits directly under the mic button.
+  const bubble = micState !== "idle" ? (
     <div style={{
-      position: "absolute", top: bubblePos.top, left: bubblePos.left, width: bubblePos.width,
+      position: "absolute", top: "calc(100% + 8px)", right: 0, width: "min(320px, 86vw)",
       zIndex: 9999, background: "white", border: "1px solid rgba(31,111,82,0.2)",
       borderRadius: 14, boxShadow: "0 12px 32px -8px rgba(19,61,47,0.22)",
-      padding: "12px 14px", fontFamily: "inherit",
+      padding: "12px 14px", fontFamily: "inherit", textAlign: "left",
     }}>
 
       {/* LISTENING */}
@@ -309,22 +288,19 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
           ))}
         </div>
       )}
-    </div>,
-    document.body
+    </div>
   ) : null;
 
   return (
-    <>
-      <div className="field-mic-wrap">
-        <button
-          ref={btnRef}
-          type="button"
-          onClick={toggle}
-          disabled={micState === "cleaning" || micState === "done"}
-          className="field-mic"
-          data-state={micState === "done" ? "idle" : micState}
-          aria-label={`Dictate ${label}`}
-        >
+    <div className="field-mic-wrap">
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={micState === "cleaning" || micState === "done"}
+        className="field-mic"
+        data-state={micState === "done" ? "idle" : micState}
+        aria-label={`Dictate ${label}`}
+      >
           {micState === "listening" && <span className="field-mic-ring" />}
 
           {micState === "cleaning" ? (
@@ -345,16 +321,15 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
             </svg>
           )}
 
-          <span className="relative">
-            {micState === "cleaning" ? "AI…"
-             : micState === "listening" ? "Stop"
-             : micState === "done" ? "Done"
-             : "Speak"}
-          </span>
-        </button>
-      </div>
+        <span className="relative">
+          {micState === "cleaning" ? "AI…"
+           : micState === "listening" ? "Stop"
+           : micState === "done" ? "Done"
+           : "Speak"}
+        </span>
+      </button>
 
       {bubble}
-    </>
+    </div>
   );
 }
