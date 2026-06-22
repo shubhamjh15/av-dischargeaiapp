@@ -42,17 +42,19 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
   const [cleanSnap, setCleanSnap] = useState("");
   const [aiError, setAiError]     = useState(false);
 
-  const btnRef      = useRef<HTMLButtonElement>(null);
+  const btnRef         = useRef<HTMLButtonElement>(null);
   const [bubblePos, setBubblePos] = useState<{ top: number; left: number } | null>(null);
-  const recRef      = useRef<ISpeechRecognition | null>(null);
-  const dictatedRef = useRef("");
-  const valueRef    = useRef(value);
-  valueRef.current  = value;
+  const recRef         = useRef<ISpeechRecognition | null>(null);
+  const dictatedRef    = useRef("");          // accumulates all finals while listening
+  const listeningRef   = useRef(false);       // true while user has the mic open
+  const valueRef       = useRef(value);
+  valueRef.current     = value;
 
   useEffect(() => {
     const rec = getRecognition();
     if (!rec) { setSupported(false); return; }
     rec.lang = "en-IN"; rec.continuous = true; rec.interimResults = true;
+
     rec.onresult = (e) => {
       let fin = "", inter = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -60,13 +62,38 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
         if (r.isFinal) fin += r[0].transcript + " ";
         else inter += r[0].transcript;
       }
-      if (fin) dictatedRef.current += fin;
+      if (fin.trim()) dictatedRef.current += fin;
       setInterim(inter);
     };
-    rec.onerror = () => { setInterim(""); };
-    rec.onend   = () => { setInterim(""); void finishAndClean(); };
+
+    rec.onerror = (e) => {
+      // Fatal errors only — "no-speech" is harmless, browser will fire onend and we restart
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        listeningRef.current = false;
+        setMicState("idle");
+      }
+      setInterim("");
+    };
+
+    // onend fires on silence timeout mid-session.
+    // If user is still listening → restart silently (no data lost, dictatedRef is intact).
+    // If user pressed Stop → proceed to clean.
+    rec.onend = () => {
+      setInterim("");
+      if (listeningRef.current) {
+        // Mid-session pause — restart immediately
+        try { rec.start(); } catch { /* already restarting */ }
+      } else {
+        // User pressed Stop — send everything to AI
+        void finishAndClean();
+      }
+    };
+
     recRef.current = rec;
-    return () => { try { rec.stop(); } catch { /* noop */ } };
+    return () => {
+      listeningRef.current = false;
+      try { rec.stop(); } catch { /* noop */ }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -114,8 +141,7 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
       if (data?.text) { onChange(data.text); setCleanSnap(data.text); }
     } catch {
       setAiError(true);
-    }
-    finally {
+    } finally {
       setMicState("done");
       setTimeout(() => {
         setMicState("idle");
@@ -128,11 +154,16 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     e.preventDefault();
     const rec = recRef.current;
     if (!rec || micState === "cleaning" || micState === "done") return;
+
     if (micState === "listening") {
-      rec.stop();
+      // User pressed Stop → signal onend to clean instead of restart
+      listeningRef.current = false;
+      setMicState("idle"); // will flip to cleaning inside finishAndClean
+      try { rec.stop(); } catch { /* noop */ }
     } else {
       dictatedRef.current = "";
       setInterim("");
+      listeningRef.current = true;
       try { rec.start(); setMicState("listening"); } catch { /* already running */ }
     }
   }
@@ -159,7 +190,6 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
       {micState === "listening" && (
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            {/* pulsing red dot */}
             <span style={{
               display: "inline-block", width: 10, height: 10, borderRadius: "50%",
               background: "#ef4444", animation: "pulseRing 1.2s ease-out infinite",
@@ -217,7 +247,6 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
             </span>
           </div>
 
-          {/* You said */}
           <div style={{ background: aiError ? "#fffbeb" : "#fff5f5", borderRadius: 8, padding: "8px 10px", marginBottom: 6 }}>
             <span style={{ fontSize: 10, fontWeight: 800, color: aiError ? "#92400e" : "#b42318", textTransform: "uppercase", letterSpacing: "0.05em" }}>
               {aiError ? "Saved as spoken" : "You said"}
@@ -228,7 +257,6 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
             )}
           </div>
 
-          {/* AI fixed (only when successful) */}
           {!aiError && (cleanSnap && cleanSnap !== rawSnap ? (
             <div style={{ background: "#f0faf4", borderRadius: 8, padding: "8px 10px" }}>
               <span style={{ fontSize: 10, fontWeight: 800, color: "#1f6f52", textTransform: "uppercase", letterSpacing: "0.05em" }}>AI fixed</span>
@@ -250,7 +278,6 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
   return (
     <>
       <div className="field-mic-wrap">
-        {/* Mic button */}
         <button
           ref={btnRef}
           type="button"

@@ -84,22 +84,25 @@ export async function cleanField(
   const completion = await groq.chat.completions.create({
     model: MODEL,
     temperature: 0,
-    max_tokens: 600,
+    max_tokens: 800,
     messages: [
       {
         role: "system",
         content:
           "You are a senior medical transcription editor for an Indian hospital discharge summary system.\n" +
-          "You are given raw text (dictated or typed) for ONE specific field. Your job:\n" +
-          "1. Fix ALL medical spelling errors (drug names, diagnoses, anatomical terms, procedures).\n" +
-          "2. Fix capitalization: drug names get Title Case (Inj. Monocef, Tab. Paracetamol), diagnoses get proper case.\n" +
-          "3. Fix punctuation and spacing.\n" +
-          "4. Expand dictation shorthand: 'one zero one' → '1-0-1', 'BP 130 by 80' → '130/80 mmHg', 'percent' → '%'.\n" +
-          "5. Apply the field-specific format described below.\n" +
-          "6. Use the cross-field context to ensure consistency (e.g. same doctor name spelling, same drug names).\n" +
-          "CRITICAL RULES:\n" +
+          "You are given raw text (dictated or typed by a doctor) for ONE specific field.\n\n" +
+          "YOUR ONLY JOB — fix spelling, format, and medical terminology. NOTHING ELSE:\n" +
+          "1. Fix ALL medical spelling: drug names (Inj. Monocef, Tab. Augmentin, Inj. Tramadol), diagnoses (fracture, haemorrhage, appendicitis), anatomical terms, eponyms.\n" +
+          "2. Fix capitalisation: drug names → Title Case. Diagnoses → sentence case.\n" +
+          "3. Expand dictation shorthand ONLY: 'one zero one' → '1-0-1', 'BP 130 by 80' → '130/80 mmHg', 'percent' → '%', 'degree' → '°', 'point' → '.'.\n" +
+          "4. Fix punctuation and spacing.\n" +
+          "5. Apply the field-specific format described in the user message.\n" +
+          "6. Use cross-field context for consistent spelling of names and drug names already recorded.\n\n" +
+          "ABSOLUTE RULES — violating any of these is a critical error:\n" +
+          "- PRESERVE EVERY PIECE OF INFORMATION. Do not delete, condense, summarise, or omit any word, number, or fact the doctor said.\n" +
+          "- Do NOT invent, add, or assume any clinical fact not present in the raw text.\n" +
+          "- Do NOT reorder sentences or restructure content.\n" +
           "- Return ONLY the corrected text. No quotes, no labels, no explanation, no preamble.\n" +
-          "- Do NOT invent, add, or remove any clinical facts. Only fix form, not content.\n" +
           "- If the text is already correct, return it exactly as-is.\n" +
           "- Never refuse. Always return something.",
       },
@@ -125,17 +128,19 @@ diagnosis, chief_complaint, history_of_present_illness, past_history, investigat
 bp, hr, spo2, temp, cvs, rs, pa,
 surgeon, anesthetist, preop_diagnosis, procedure_proposed, anesthesia_type, date_of_procedure, procedure_steps,
 general_advice, review_note, doctors_signature,
-treatment_given (array of objects: {drug, dose, route, frequency}),
-discharge_meds (array of objects: {drug, dosage_pattern, duration}).
+treatment_given (array of {drug, dose, route, frequency}),
+discharge_meds (array of {drug, dosage_pattern, duration}).
 
-Rules:
-- Preserve all medical terms, drug names, dosages exactly as dictated but fix obvious spelling errors.
-- "one zero one" style dictation → "1-0-1". "BP 130 by 80" → "130/80 mmHg".
-- payment_type is "Cash" or the insurer name.
-- Do NOT invent facts. If something was not said, leave it as "".
-- Medications: split each into parts. "Inj Monocef 1gm IV one zero one" → {drug:"Inj. Monocef 1gm", dose:"1gm", route:"IV", frequency:"1-0-1"}.
-- Dates: format as DD-Mon-YYYY.
-- Return ONLY the JSON object, nothing else.`;
+RULES — follow every one precisely:
+- CAPTURE EVERY DETAIL the doctor mentioned. Do not skip, condense, or summarise anything.
+- Fix medical spelling: drug names (Inj. Monocef, Tab. Augmentin), diagnoses (fracture, haemorrhage), procedures — use correct medical English.
+- Expand dictation shorthand: "one zero one" → "1-0-1", "BP 130 by 80" → "130/80 mmHg", "percent" → "%".
+- payment_type: "Cash" or insurer name.
+- Do NOT invent facts not stated. Use "" for any field not mentioned.
+- Medications — split each drug: "Inj Monocef 1gm IV one zero one" → {drug:"Inj. Monocef 1gm", dose:"1gm", route:"IV", frequency:"1-0-1"}.
+- Dates: format as DD-Mon-YYYY (e.g. "03-Jun-2026").
+- For narrative fields (history_of_present_illness, course_in_hospital, procedure_steps): write complete sentences preserving every clinical detail — do NOT shorten.
+- Return ONLY the JSON object, no markdown, no explanation, no preamble.`;
 
 export async function extractSummary(rawText: string): Promise<DischargeSummary> {
   const apiKey = process.env.GROQ_API_KEY;
@@ -144,13 +149,16 @@ export async function extractSummary(rawText: string): Promise<DischargeSummary>
   const groq = new Groq({ apiKey });
   const completion = await groq.chat.completions.create({
     model: MODEL,
-    temperature: 0.1,
+    temperature: 0,
+    max_tokens: 4096,
     response_format: { type: "json_object" },
     messages: [
       {
         role: "system",
         content:
-          "You convert a doctor's free-form discharge dictation into structured JSON fields for an Indian hospital discharge summary. " +
+          "You are a medical transcription AI for an Indian hospital. " +
+          "Convert the doctor's free-form discharge dictation into structured JSON. " +
+          "Use correct medical English spelling and terminology throughout. " +
           FIELD_GUIDE,
       },
       {

@@ -31,21 +31,22 @@ function getRecognition(): ISpeechRecognition | null {
   return Ctor ? new Ctor() : null;
 }
 
-export default function Dictation({
-  onAppend,
-}: {
-  onAppend: (text: string) => void;
-}) {
+export default function Dictation({ onAppend }: { onAppend: (text: string) => void }) {
   const [listening, setListening] = useState(false);
   const [supported, setSupported] = useState(true);
   const [interim, setInterim] = useState("");
-  const recRef = useRef<ISpeechRecognition | null>(null);
+
+  const recRef        = useRef<ISpeechRecognition | null>(null);
+  const listeningRef  = useRef(false);   // source of truth for onend restart logic
+  const onAppendRef   = useRef(onAppend);
+  onAppendRef.current = onAppend;
 
   useEffect(() => {
     const rec = getRecognition();
     if (!rec) { setSupported(false); return; }
-    rec.lang = "en-IN";
-    rec.continuous = true;
+
+    rec.lang           = "en-IN";
+    rec.continuous     = true;
     rec.interimResults = true;
 
     rec.onresult = (e) => {
@@ -56,25 +57,52 @@ export default function Dictation({
         if (r.isFinal) finalChunk += r[0].transcript;
         else interimChunk += r[0].transcript;
       }
-      if (finalChunk) onAppend(finalChunk.trim() + " ");
+      // Append final text immediately so nothing is lost
+      if (finalChunk.trim()) {
+        onAppendRef.current(finalChunk.trim() + " ");
+      }
       setInterim(interimChunk);
     };
-    rec.onerror = () => { setListening(false); setInterim(""); };
-    rec.onend   = () => { setListening(false); setInterim(""); };
+
+    rec.onerror = (e) => {
+      // "no-speech" and "aborted" are harmless mid-session — don't stop
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        listeningRef.current = false;
+        setListening(false);
+      }
+      setInterim("");
+    };
+
+    // onend fires whenever the browser pauses (e.g. silence timeout).
+    // If the user hasn't pressed Stop, restart immediately so dictation never drops.
+    rec.onend = () => {
+      setInterim("");
+      if (listeningRef.current) {
+        try { rec.start(); } catch { /* already restarting */ }
+      } else {
+        setListening(false);
+      }
+    };
 
     recRef.current = rec;
-    return () => { try { rec.stop(); } catch { /* noop */ } };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      listeningRef.current = false;
+      try { rec.stop(); } catch { /* noop */ }
+    };
   }, []);
 
   function toggle() {
     const rec = recRef.current;
     if (!rec) return;
-    if (listening) {
-      rec.stop();
+    if (listeningRef.current) {
+      listeningRef.current = false;
       setListening(false);
+      try { rec.stop(); } catch { /* noop */ }
     } else {
-      try { rec.start(); setListening(true); } catch { /* already started */ }
+      listeningRef.current = true;
+      setListening(true);
+      setInterim("");
+      try { rec.start(); } catch { /* noop */ }
     }
   }
 
@@ -117,7 +145,7 @@ export default function Dictation({
       </button>
 
       {(interim || listening) && (
-        <p className="min-w-0 truncate text-sm">
+        <p className="min-w-0 flex-1 text-sm">
           {interim ? (
             <span className="italic text-[var(--green-600)]">&ldquo;{interim}&rdquo;</span>
           ) : (
