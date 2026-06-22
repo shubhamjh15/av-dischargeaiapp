@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { DischargeSummary } from "@/lib/schema";
+import { registerActiveMic, unregisterActiveMic } from "@/lib/micRegistry";
 
 type SpeechRecognitionResult = { 0: { transcript: string }; isFinal: boolean };
 type SpeechRecognitionEvent  = { resultIndex: number; results: { length: number; [i: number]: SpeechRecognitionResult } };
@@ -42,13 +43,14 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
   const [cleanSnap, setCleanSnap] = useState("");
   const [aiError, setAiError]     = useState(false);
 
-  const btnRef         = useRef<HTMLButtonElement>(null);
+  const btnRef      = useRef<HTMLButtonElement>(null);
   const [bubblePos, setBubblePos] = useState<{ top: number; left: number } | null>(null);
-  const recRef         = useRef<ISpeechRecognition | null>(null);
-  const dictatedRef    = useRef("");          // accumulates all finals while listening
-  const listeningRef   = useRef(false);       // true while user has the mic open
-  const valueRef       = useRef(value);
-  valueRef.current     = value;
+  const recRef      = useRef<ISpeechRecognition | null>(null);
+  const dictatedRef   = useRef("");      // accumulates all finals during this session
+  const activeRef     = useRef(false);  // true only while THIS mic is intentionally running
+  const finalizedUpTo = useRef(-1);     // highest resultIndex we've already committed (dedup)
+  const valueRef      = useRef(value);
+  valueRef.current    = value;
 
   useEffect(() => {
     const rec = getRecognition();
@@ -59,45 +61,45 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
       let fin = "", inter = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
-        if (r.isFinal) fin += r[0].transcript + " ";
-        else inter += r[0].transcript;
+        if (r.isFinal) {
+          // Only commit if we haven't already processed this index
+          if (i > finalizedUpTo.current) {
+            fin += r[0].transcript + " ";
+            finalizedUpTo.current = i;
+          }
+        } else {
+          inter += r[0].transcript;
+        }
       }
       if (fin.trim()) dictatedRef.current += fin;
       setInterim(inter);
     };
 
     rec.onerror = (e) => {
-      // Fatal errors only — "no-speech" is harmless, browser will fire onend and we restart
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-        listeningRef.current = false;
-        setMicState("idle");
+        forceStop();
       }
       setInterim("");
     };
 
-    // onend fires on silence timeout mid-session.
-    // If user is still listening → restart silently (no data lost, dictatedRef is intact).
-    // If user pressed Stop → proceed to clean.
+    // onend fires on silence. For field mics: auto-stop and clean — do NOT restart.
+    // This is the fix for "should automatically close after speaking".
     rec.onend = () => {
       setInterim("");
-      if (listeningRef.current) {
-        // Mid-session pause — restart immediately
-        try { rec.start(); } catch { /* already restarting */ }
-      } else {
-        // User pressed Stop — send everything to AI
+      if (activeRef.current) {
+        // Natural silence end — auto-stop and clean
+        activeRef.current = false;
+        unregisterActiveMic(forceStop);
         void finishAndClean();
       }
     };
 
     recRef.current = rec;
-    return () => {
-      listeningRef.current = false;
-      try { rec.stop(); } catch { /* noop */ }
-    };
+    return () => { forceStop(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update bubble anchor position whenever state changes
+  // Update bubble position
   useEffect(() => {
     if (micState !== "idle" && btnRef.current) {
       const r = btnRef.current.getBoundingClientRect();
@@ -110,12 +112,21 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     }
   }, [micState, interim]);
 
+  function forceStop() {
+    activeRef.current = false;
+    setMicState("idle");
+    setInterim("");
+    dictatedRef.current = "";
+    finalizedUpTo.current = -1;
+    try { recRef.current?.stop(); } catch { /* noop */ }
+  }
+
   async function finishAndClean() {
     const dictated = dictatedRef.current.trim();
     dictatedRef.current = "";
     if (!dictated) { setMicState("idle"); return; }
 
-    // AUTO: if field already has content → append; if empty → replace
+    // Read the CURRENT field value at the moment we finish (not a stale closure)
     const existing    = valueRef.current.trim();
     const textToClean = existing ? `${existing} ${dictated}` : dictated;
 
@@ -156,20 +167,24 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     if (!rec || micState === "cleaning" || micState === "done") return;
 
     if (micState === "listening") {
-      // Signal onend to clean (not restart), then stop. onend → finishAndClean owns state from here.
-      listeningRef.current = false;
+      // Manual stop — unregister, then let onend fire and call finishAndClean
+      activeRef.current = false;
+      unregisterActiveMic(forceStop);
       try { rec.stop(); } catch { /* noop */ }
     } else {
+      // Register as the global active mic — stops any other field mic that's running
+      registerActiveMic(forceStop);
       dictatedRef.current = "";
+      finalizedUpTo.current = -1;
       setInterim("");
-      listeningRef.current = true;
-      try { rec.start(); setMicState("listening"); } catch { /* already running */ }
+      activeRef.current = true;
+      try { rec.start(); setMicState("listening"); } catch { /* noop */ }
     }
   }
 
   if (!supported) return null;
 
-  // ── portal bubble ──────────────────────────────────────────────────────
+  // Display interim text inside the field by showing it in the bubble
   const bubble = bubblePos ? createPortal(
     <div style={{
       position: "absolute",
@@ -194,15 +209,21 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
               background: "#ef4444", animation: "pulseRing 1.2s ease-out infinite",
             }} />
             <span style={{ fontSize: 12, fontWeight: 700, color: "#b42318", letterSpacing: "0.04em", textTransform: "uppercase" }}>
-              Listening
+              Listening — {label}
             </span>
           </div>
-          {interim ? (
-            <p style={{ margin: 0, fontSize: 13, color: "#1a2e24", fontStyle: "italic", lineHeight: 1.5 }}>
-              &ldquo;{interim}&rdquo;
+          {/* Show accumulated finals + current interim so user sees everything */}
+          {(dictatedRef.current.trim() || interim) ? (
+            <p style={{ margin: 0, fontSize: 13, color: "#1a2e24", lineHeight: 1.6 }}>
+              {dictatedRef.current && (
+                <span style={{ fontWeight: 600 }}>{dictatedRef.current}</span>
+              )}
+              {interim && (
+                <span style={{ fontStyle: "italic", color: "#6b8f7a" }}>{interim}</span>
+              )}
             </p>
           ) : (
-            <p style={{ margin: 0, fontSize: 12, color: "#9aa8a1" }}>Speak now — hearing your voice&hellip;</p>
+            <p style={{ margin: 0, fontSize: 12, color: "#9aa8a1" }}>Speak now — will auto-stop on silence</p>
           )}
         </div>
       )}
@@ -252,7 +273,7 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
             </span>
             <p style={{ margin: "4px 0 0", fontSize: 12, color: aiError ? "#5a4a2a" : "#7a3030", fontStyle: "italic", lineHeight: 1.5, textDecoration: aiError ? "none" : "line-through" }}>{rawSnap}</p>
             {aiError && (
-              <p style={{ margin: "6px 0 0", fontSize: 11, color: "#92400e" }}>AI correction failed — your text was saved as-is. You can edit manually.</p>
+              <p style={{ margin: "6px 0 0", fontSize: 11, color: "#92400e" }}>AI correction failed — your text was saved as-is.</p>
             )}
           </div>
 
@@ -284,7 +305,7 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
           disabled={micState === "cleaning" || micState === "done"}
           className="field-mic"
           data-state={micState === "done" ? "idle" : micState}
-          aria-label="Dictate into this field"
+          aria-label={`Dictate ${label}`}
         >
           {micState === "listening" && <span className="field-mic-ring" />}
 

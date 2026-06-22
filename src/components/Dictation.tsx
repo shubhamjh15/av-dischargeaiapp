@@ -36,10 +36,11 @@ export default function Dictation({ onAppend }: { onAppend: (text: string) => vo
   const [supported, setSupported] = useState(true);
   const [interim, setInterim] = useState("");
 
-  const recRef        = useRef<ISpeechRecognition | null>(null);
-  const listeningRef  = useRef(false);   // source of truth for onend restart logic
-  const onAppendRef   = useRef(onAppend);
-  onAppendRef.current = onAppend;
+  const recRef          = useRef<ISpeechRecognition | null>(null);
+  const listeningRef    = useRef(false);   // source of truth for onend restart logic
+  const finalizedUpTo   = useRef(-1);      // dedup: highest resultIndex already committed
+  const onAppendRef     = useRef(onAppend);
+  onAppendRef.current   = onAppend;
 
   useEffect(() => {
     const rec = getRecognition();
@@ -54,10 +55,15 @@ export default function Dictation({ onAppend }: { onAppend: (text: string) => vo
       let interimChunk = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
-        if (r.isFinal) finalChunk += r[0].transcript;
-        else interimChunk += r[0].transcript;
+        if (r.isFinal) {
+          if (i > finalizedUpTo.current) {
+            finalChunk += r[0].transcript;
+            finalizedUpTo.current = i;
+          }
+        } else {
+          interimChunk += r[0].transcript;
+        }
       }
-      // Append final text immediately so nothing is lost
       if (finalChunk.trim()) {
         onAppendRef.current(finalChunk.trim() + " ");
       }
@@ -100,6 +106,7 @@ export default function Dictation({ onAppend }: { onAppend: (text: string) => vo
       try { rec.stop(); } catch { /* noop */ }
     } else {
       listeningRef.current = true;
+      finalizedUpTo.current = -1;
       setListening(true);
       setInterim("");
       try { rec.start(); } catch { /* noop */ }
