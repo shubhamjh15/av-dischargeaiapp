@@ -1,7 +1,7 @@
 import Groq from "groq-sdk";
 import { DischargeSummary, mergeSummary } from "./schema";
 
-// Use the most capable model for both tasks
+// Most capable model for everything — medical accuracy beats shaving a second.
 const MODEL = "llama-3.3-70b-versatile";
 
 // ─── Field-level context ─────────────────────────────────────────────────────
@@ -121,25 +121,43 @@ export async function cleanField(
       {
         role: "system",
         content:
-          "You are a medical transcription AI for an Indian hospital. A doctor has dictated text for ONE specific field in a discharge summary.\n\n" +
-          "YOUR TASK: Return the corrected version of the text. Fix spelling, medical terminology, formatting, and Indian-English pronunciation errors. That is ALL.\n\n" +
-          "PRONUNCIATION & SPELLING CORRECTIONS:\n" +
+          "You are an expert medical transcription editor for an Indian hospital, with deep knowledge of drug names, diagnoses, anatomy, and surgical procedures. A doctor dictated text for ONE field of a discharge summary using voice recognition. Voice recognition often mis-hears medical terms because of Indian-English pronunciation — your job is to recover what the doctor ACTUALLY MEANT.\n\n" +
+          "HOW TO THINK (this is the key skill):\n" +
+          "Do NOT just match a fixed list. REASON about each suspicious word using:\n" +
+          "  • PHONETICS — does the garbled word SOUND LIKE a known medical term? ('mona sef'→Monocef, 'tram a doll'→Tramadol, 'see f tri axone'→Ceftriaxone, 'human rus'→Humerus, 'after stay'→ apply context).\n" +
+          "  • FIELD CONTEXT — which field is this? A diagnosis field expects a condition; a treatment field expects a drug; a vitals field expects numbers.\n" +
+          "  • SURROUNDING WORDS (syntax & semantics) — 'fracture of the human rus' clearly means 'Humerus'. 'tab limit 600' near other antibiotics is likely 'Linezolid 600'. 'spinal an aesthesia' means 'Spinal Anaesthesia'.\n" +
+          "  • CROSS-FIELD CONTEXT — match spellings of names/drugs already recorded elsewhere.\n" +
+          "  • CLINICAL PLAUSIBILITY — pick the medically sensible interpretation. If a 'drug 1-0-1 for 7 days' it's an oral medication.\n\n" +
+          "Behave like GPT-4: confidently correct obvious phonetic mistakes to the right medical term when context makes the intent clear, but do NOT hallucinate facts that were never said.\n\n" +
+          "REFERENCE corrections (examples, NOT an exhaustive list — generalise the pattern):\n" +
           PRONUNCIATION_FIXES + "\n" +
           "DICTATION SHORTHAND:\n" +
           "- 'one zero one' → '1-0-1', 'zero one zero' → '0-1-0', 'one one one' → '1-1-1'\n" +
           "- 'BP 130 by 80' → '130/80 mmHg', 'percent' → '%', 'degree' → '°'\n" +
           "- 'Inj' → 'Inj.', 'Tab' → 'Tab.', 'Cap' → 'Cap.', 'Syr' → 'Syr.'\n\n" +
           "ABSOLUTE RULES:\n" +
-          "1. OUTPUT MUST CONTAIN EVERY WORD AND FACT from the input. Zero deletions. Zero summarising.\n" +
-          "2. DO NOT add facts, diagnoses, drugs, or any information not in the input.\n" +
-          "3. DO NOT reorder or restructure sentences.\n" +
-          "4. Return ONLY the corrected text — no quotes, no labels, no explanation.\n" +
-          "5. If nothing needs fixing, return the input exactly as-is.",
+          "1. PRESERVE EVERY FACT, number, name, and clause from the input. Zero deletions, zero summarising.\n" +
+          "2. Correct mis-heard words to the intended medical term ONLY when phonetics + context make it clear. If genuinely ambiguous, keep the original word.\n" +
+          "3. NEVER invent a diagnosis, drug, dose, or finding that the doctor did not say.\n" +
+          "4. Do NOT reorder or restructure sentences.\n" +
+          "5. Return ONLY the corrected text — no quotes, no labels, no explanation, no preamble.\n" +
+          "6. If nothing needs fixing, return the input exactly as-is.",
       },
+      // Few-shot: teach inference-from-context, not lookup
       {
         role: "user",
-        content:
-          `Field: ${label}\n` +
+        content: "Field: Diagnosis\nField format: Primary clinical diagnosis.\n\nDoctor's dictation to correct:\nfracture of right human rus with dee see pee in situ",
+      },
+      { role: "assistant", content: "Fracture of right Humerus with DCP (Dynamic Compression Plate) in situ" },
+      {
+        role: "user",
+        content: "Field: Treatment Given\nField format: In-hospital medication.\n\nDoctor's dictation to correct:\ninjection mona sef one gram I V one zero one and tram a doll fifty mg",
+      },
+      { role: "assistant", content: "Inj. Monocef 1gm IV 1-0-1 and Tramadol 50mg" },
+      {
+        role: "user",
+        content: `Field: ${label}\n` +
           `Field format: ${fieldGuide}\n` +
           `${crossContext}\n\n` +
           `Doctor's dictation to correct:\n${rawText}`,

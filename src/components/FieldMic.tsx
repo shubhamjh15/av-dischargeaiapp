@@ -106,20 +106,24 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Bubble position — clamp to viewport
+  // Bubble position — compute ONCE when the bubble opens (idle→active), not on every
+  // transcript word. getBoundingClientRect() forces layout reflow, so calling it on
+  // each interim update was a real per-word jank source.
   useEffect(() => {
-    if (micState !== "idle" && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      const bubbleW = Math.min(320, window.innerWidth - 16);
-      const left = Math.min(
-        Math.max(8, r.right + window.scrollX - bubbleW),
-        window.innerWidth + window.scrollX - bubbleW - 8
-      );
-      setBubblePos({ top: r.bottom + window.scrollY + 8, left, width: bubbleW });
-    } else {
+    if (micState !== "idle") {
+      if (!bubblePos && btnRef.current) {
+        const r = btnRef.current.getBoundingClientRect();
+        const bubbleW = Math.min(320, window.innerWidth - 16);
+        const left = Math.min(
+          Math.max(8, r.right + window.scrollX - bubbleW),
+          window.innerWidth + window.scrollX - bubbleW - 8
+        );
+        setBubblePos({ top: r.bottom + window.scrollY + 8, left, width: bubbleW });
+      }
+    } else if (bubblePos) {
       setBubblePos(null);
     }
-  }, [micState, interim, liveText]);
+  }, [micState, bubblePos]);
 
   function clearSilenceTimer() {
     if (silenceTimer.current) { clearTimeout(silenceTimer.current); silenceTimer.current = null; }

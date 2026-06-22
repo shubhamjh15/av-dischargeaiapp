@@ -59,13 +59,14 @@ function FloatChip({
   return (
     <div
       className="absolute animate-float"
-      style={{ top, left, animationDelay: delay }}
+      style={{ top, left, animationDelay: delay, willChange: "transform" }}
     >
+      {/* PERF: solid translucent bg instead of backdrop-filter — animating an element
+          with backdrop-filter forces a full-screen GPU recomposite every frame. */}
       <div
         className="flex h-14 w-14 items-center justify-center rounded-2xl text-2xl"
         style={{
-          background: "rgba(255,255,255,0.65)",
-          backdropFilter: "blur(10px)",
+          background: "rgba(255,255,255,0.78)",
           border: "1px solid rgba(255,255,255,0.7)",
           boxShadow:
             "0 14px 30px -12px rgba(27,60,141,0.4), inset 0 1px 0 rgba(255,255,255,0.7)",
