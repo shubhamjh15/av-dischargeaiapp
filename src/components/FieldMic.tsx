@@ -156,9 +156,8 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     if (!rec || micState === "cleaning" || micState === "done") return;
 
     if (micState === "listening") {
-      // User pressed Stop → signal onend to clean instead of restart
+      // Signal onend to clean (not restart), then stop. onend → finishAndClean owns state from here.
       listeningRef.current = false;
-      setMicState("idle"); // will flip to cleaning inside finishAndClean
       try { rec.stop(); } catch { /* noop */ }
     } else {
       dictatedRef.current = "";
