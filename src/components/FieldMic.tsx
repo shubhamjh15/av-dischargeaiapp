@@ -44,7 +44,7 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
   const [aiError, setAiError]     = useState(false);
 
   const btnRef      = useRef<HTMLButtonElement>(null);
-  const [bubblePos, setBubblePos] = useState<{ top: number; left: number } | null>(null);
+  const [bubblePos, setBubblePos] = useState<{ top: number; left: number; width: number } | null>(null);
   const recRef      = useRef<ISpeechRecognition | null>(null);
   const dictatedRef   = useRef("");      // accumulates all finals during this session
   const activeRef     = useRef(false);  // true only while THIS mic is intentionally running
@@ -78,6 +78,11 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     rec.onerror = (e) => {
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         forceStop();
+        // Show mic permission error in bubble briefly
+        setMicState("done");
+        setRawSnap("Microphone access denied. Please allow mic in browser settings.");
+        setAiError(true);
+        setTimeout(() => { setMicState("idle"); setRawSnap(""); setAiError(false); setBubblePos(null); }, 4000);
       }
       setInterim("");
     };
@@ -99,14 +104,16 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update bubble position
+  // Update bubble position — clamp so it never overflows viewport
   useEffect(() => {
     if (micState !== "idle" && btnRef.current) {
       const r = btnRef.current.getBoundingClientRect();
-      setBubblePos({
-        top:  r.bottom + window.scrollY + 8,
-        left: Math.max(8, r.right + window.scrollX - 320),
-      });
+      const bubbleW = Math.min(320, window.innerWidth - 16);
+      const left = Math.min(
+        Math.max(8, r.right + window.scrollX - bubbleW),
+        window.innerWidth + window.scrollX - bubbleW - 8
+      );
+      setBubblePos({ top: r.bottom + window.scrollY + 8, left, width: bubbleW });
     } else {
       setBubblePos(null);
     }
@@ -190,7 +197,7 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
       position: "absolute",
       top: bubblePos.top,
       left: bubblePos.left,
-      width: 320,
+      width: bubblePos.width,
       zIndex: 9999,
       background: "white",
       border: "1px solid rgba(31,111,82,0.2)",
