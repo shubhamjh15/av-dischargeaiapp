@@ -86,6 +86,34 @@ Common Indian-English dictation corrections to apply (pronunciation → correct 
 - "nontender" / "non tender" → "non-tender"
 `;
 
+// ─── Medical abbreviations ───────────────────────────────────────────────────
+// Voice recognition spells abbreviations out as separate spaced letters
+// ("CAD" → "C A D" or "CA D" or "see a dee"). Re-assemble them using context.
+const ABBREVIATIONS = `
+ABBREVIATIONS — voice recognition often splits letters apart or spells them phonetically.
+Re-assemble spaced/spelled-out letters into the correct abbreviation when context fits:
+- "C A D" / "CA D" / "see a dee" / "sad" (in a cardiac context) → "CAD" (Coronary Artery Disease)
+- "C K D" / "see kay dee" → "CKD" (Chronic Kidney Disease)
+- "C O P D" / "copd" → "COPD" (Chronic Obstructive Pulmonary Disease)
+- "D M" / "dee em" / "diabetes" → "DM" (Diabetes Mellitus)
+- "H T N" / "hypertension" → "HTN" (Hypertension)
+- "T2 D M" / "type two dm" → "T2DM" (Type 2 Diabetes Mellitus)
+- "M I" / "em eye" / "myocardial infarction" → "MI" (Myocardial Infarction)
+- "C V A" / "see vee aye" / "stroke" → "CVA" (Cerebrovascular Accident)
+- "U T I" / "you tee eye" → "UTI" (Urinary Tract Infection)
+- "I H D" → "IHD" (Ischaemic Heart Disease)
+- "L R T I" → "LRTI" (Lower Respiratory Tract Infection)
+- "A K I" → "AKI" (Acute Kidney Injury)
+- "B P H" → "BPH" (Benign Prostatic Hyperplasia)
+- "G E R D" / "acidity" → "GERD"
+- "D V T" → "DVT" (Deep Vein Thrombosis)
+- "K/C/O" / "known case of" → "K/C/O"
+- "C A D" should NEVER stay as "CA D" or "C A D" — always collapse to "CAD".
+RULE: when you see isolated single capital letters separated by spaces that form a known
+medical abbreviation, JOIN them. Expand to the full form in brackets the first time:
+"CAD" → "CAD (Coronary Artery Disease)".
+`;
+
 export async function cleanField(
   rawText: string,
   fieldKey: string,
@@ -132,6 +160,7 @@ export async function cleanField(
           "  • If a word is NOT clearly a mis-heard medical term, LEAVE IT EXACTLY AS IS. Do not touch normal English words.\n\n" +
           "REFERENCE corrections (examples — generalise the phonetic pattern, this is not the full list):\n" +
           PRONUNCIATION_FIXES + "\n" +
+          ABBREVIATIONS + "\n" +
           "DICTATION SHORTHAND:\n" +
           "- 'one zero one' → '1-0-1', 'zero one zero' → '0-1-0', 'one one one' → '1-1-1'\n" +
           "- 'BP 130 by 80' → '130/80 mmHg', 'percent' → '%', 'degree' → '°'\n" +
@@ -160,6 +189,11 @@ export async function cleanField(
         content: "Field: Treatment Given\nField format: In-hospital medication.\n\nDoctor's dictation to correct:\ninjection mona sef one gram I V one zero one and tram a doll fifty mg",
       },
       { role: "assistant", content: "Inj. Monocef 1gm IV 1-0-1 and Tramadol 50mg" },
+      {
+        role: "user",
+        content: "Field: Past History\nField format: Past medical history.\n\nDoctor's dictation to correct:\nknown case of CA D and H T N since five years",
+      },
+      { role: "assistant", content: "Known case of CAD (Coronary Artery Disease) and HTN (Hypertension) since five years" },
       {
         role: "user",
         content: `Field: ${label}\n` +
@@ -223,6 +257,7 @@ export async function extractSummary(rawText: string): Promise<DischargeSummary>
           "You are a medical transcription AI for an Indian multispeciality hospital. " +
           "Convert a doctor's free-form discharge dictation into structured JSON fields. " +
           "Use correct medical English spelling throughout. Apply Indian pronunciation corrections (e.g. 'mona sef' → 'Monocef'). " +
+          "Re-assemble spaced/spelled-out abbreviations using context: 'C A D'/'CA D' → 'CAD (Coronary Artery Disease)', 'H T N' → 'HTN (Hypertension)', 'C K D' → 'CKD', 'D M' → 'DM', 'C O P D' → 'COPD'. " +
           FIELD_GUIDE,
       },
       {

@@ -4,15 +4,18 @@ import { useEffect, useRef, useState } from "react";
 import { DischargeSummary } from "@/lib/schema";
 import { registerActiveMic, unregisterActiveMic } from "@/lib/micRegistry";
 
-type SpeechRecognitionResult = { 0: { transcript: string }; isFinal: boolean };
+type SpeechRecognitionResult = { 0: { transcript: string; confidence: number }; isFinal: boolean };
 type SpeechRecognitionEvent  = { resultIndex: number; results: { length: number; [i: number]: SpeechRecognitionResult } };
 interface ISpeechRecognition {
-  lang: string; continuous: boolean; interimResults: boolean;
+  lang: string; continuous: boolean; interimResults: boolean; maxAlternatives: number;
   onresult: ((e: SpeechRecognitionEvent) => void) | null;
   onerror:  ((e: { error: string }) => void) | null;
   onend:    (() => void) | null;
   start: () => void; stop: () => void; abort: () => void;
 }
+
+// Reject low-confidence final results — this is what filters out background chatter/noise.
+const MIN_CONFIDENCE = 0.55;
 
 function getRecognition(): ISpeechRecognition | null {
   if (typeof window === "undefined") return null;
@@ -60,14 +63,21 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     const rec = getRecognition();
     if (!rec) { setSupported(false); return; }
     rec.lang = "en-IN"; rec.continuous = true; rec.interimResults = true;
+    rec.maxAlternatives = 1;
 
     rec.onresult = (e) => {
       let fin = "", inter = "";
       // Rebuild from scratch each event using only final results — simplest correct approach.
       for (let i = 0; i < e.results.length; i++) {
         const r = e.results[i];
-        if (r.isFinal) fin += r[0].transcript + " ";
-        else inter += r[0].transcript;
+        if (r.isFinal) {
+          // NOISE FILTER: drop low-confidence finals (background talk, coughs, etc.).
+          // confidence can be 0 on some engines — treat 0 as "unknown" and keep it.
+          const conf = r[0].confidence;
+          if (conf === 0 || conf >= MIN_CONFIDENCE) fin += r[0].transcript + " ";
+        } else {
+          inter += r[0].transcript;
+        }
       }
       dictatedRef.current = fin;          // full final text so far (not appended — rebuilt)
       setLiveText(fin.trim());
