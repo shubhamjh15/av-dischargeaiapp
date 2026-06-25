@@ -15,7 +15,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <style>{`html { zoom: 1.15; }`}</style>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+        {/* 15% zoom only on desktop. On phones/tablets the screen is already small,
+            so zoom would blow the layout out of the viewport (caused the broken mobile UI). */}
+        <style>{`
+          @media (min-width: 768px) { html { zoom: 1.15; } }
+        `}</style>
       </head>
       <body>{children}</body>
     </html>

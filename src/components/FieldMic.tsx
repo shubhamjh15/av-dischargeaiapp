@@ -48,13 +48,14 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
   const [cleanSnap, setCleanSnap] = useState("");
   const [aiError, setAiError]     = useState(false);
 
-  const recRef        = useRef<ISpeechRecognition | null>(null);
-  const dictatedRef   = useRef("");     // accumulates all final transcripts this session
-  const stoppingRef   = useRef(false);  // true once we've decided to finish (prevents double-clean)
-  const listeningRef  = useRef(false);  // mirror of "is the mic actively running" for callbacks
-  const silenceTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const valueRef      = useRef(value);
-  valueRef.current    = value;
+  const recRef            = useRef<ISpeechRecognition | null>(null);
+  const dictatedRef       = useRef("");    // accumulates committed final text across sessions
+  const committedIndexRef = useRef(-1);    // highest results[] index committed THIS session (dedup)
+  const stoppingRef       = useRef(false); // true once we've decided to finish (prevents double-clean)
+  const listeningRef      = useRef(false); // mirror of "is the mic actively running" for callbacks
+  const silenceTimer      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const valueRef          = useRef(value);
+  valueRef.current        = value;
 
   // keep stable refs to functions used in recognition callbacks
   const finishRef = useRef<() => void>(() => {});
@@ -62,27 +63,30 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
   useEffect(() => {
     const rec = getRecognition();
     if (!rec) { setSupported(false); return; }
-    rec.lang = "en-IN"; rec.continuous = true; rec.interimResults = true;
+    // NON-continuous: one phrase at a time. This is the key fix for the duplication bug —
+    // continuous mode on mobile Chrome re-emits the same finals over and over.
+    rec.lang = "en-IN"; rec.continuous = false; rec.interimResults = true;
     rec.maxAlternatives = 1;
 
     rec.onresult = (e) => {
-      let fin = "", inter = "";
-      // Rebuild from scratch each event using only final results — simplest correct approach.
-      for (let i = 0; i < e.results.length; i++) {
+      // Commit only results we haven't committed yet, tracked by absolute index.
+      let inter = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
         if (r.isFinal) {
-          // NOISE FILTER: drop low-confidence finals (background talk, coughs, etc.).
-          // confidence can be 0 on some engines — treat 0 as "unknown" and keep it.
-          const conf = r[0].confidence;
-          if (conf === 0 || conf >= MIN_CONFIDENCE) fin += r[0].transcript + " ";
+          if (i > committedIndexRef.current) {
+            const conf = r[0].confidence;
+            if (conf === 0 || conf >= MIN_CONFIDENCE) {
+              dictatedRef.current += r[0].transcript.trim() + " ";
+            }
+            committedIndexRef.current = i;
+          }
         } else {
           inter += r[0].transcript;
         }
       }
-      dictatedRef.current = fin;          // full final text so far (not appended — rebuilt)
-      setLiveText(fin.trim());
+      setLiveText(dictatedRef.current.trim());
       setInterim(inter);
-      // Reset silence countdown on any speech activity
       armSilenceTimer();
     };
 
@@ -98,11 +102,16 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     };
 
     rec.onend = () => {
-      clearSilenceTimer();
-      // If we're intentionally stopping → clean. Otherwise (Chrome dropped) restart to keep going.
       if (stoppingRef.current) {
+        clearSilenceTimer();
         finishRef.current();
       } else if (listeningRef.current) {
+        // Non-continuous session ended (Chrome ends after each utterance) but the user
+        // is still in a dictation → restart a FRESH session to keep capturing.
+        // Reset the per-session index (results[] restarts at 0) but KEEP dictatedRef.
+        // Do NOT clear the silence timer — it's what eventually auto-stops us.
+        committedIndexRef.current = -1;
+        setInterim("");
         try { rec.start(); } catch { /* will retry */ }
       }
     };
@@ -132,6 +141,7 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     stoppingRef.current = false;
     listeningRef.current = false;
     dictatedRef.current = "";
+    committedIndexRef.current = -1;
     clearSilenceTimer();
     unregisterActiveMic(requestStop);
     try { recRef.current?.abort(); } catch { /* noop */ }
@@ -198,6 +208,7 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
     stoppingRef.current = false;
     listeningRef.current = true;
     dictatedRef.current = "";
+    committedIndexRef.current = -1;
     setLiveText(""); setInterim("");
     try { rec.start(); setMicState("listening"); armSilenceTimer(); } catch { /* already running */ }
   }
@@ -217,7 +228,8 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
   // This is immune to page zoom and scroll — it always sits directly under the mic button.
   const bubble = micState !== "idle" ? (
     <div style={{
-      position: "absolute", top: "calc(100% + 8px)", right: 0, width: "min(320px, 86vw)",
+      position: "absolute", top: "calc(100% + 8px)", right: 0, width: "min(300px, 80vw)",
+      maxHeight: "40vh", overflowY: "auto",
       zIndex: 9999, background: "white", border: "1px solid rgba(31,111,82,0.2)",
       borderRadius: 14, boxShadow: "0 12px 32px -8px rgba(19,61,47,0.22)",
       padding: "12px 14px", fontFamily: "inherit", textAlign: "left",
