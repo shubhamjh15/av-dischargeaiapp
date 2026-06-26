@@ -31,6 +31,15 @@ type MicState = "idle" | "listening" | "cleaning" | "done";
 
 const SILENCE_MS = 2500; // auto-stop after this much silence
 
+// Long narrative fields APPEND (build them up over multiple dictations).
+// Everything else REPLACES (short single-value fields — re-dictating fixes a wrong value
+// instead of producing "47 years 999 99 years").
+const APPEND_FIELDS = new Set([
+  "diagnosis", "chief_complaint", "history_of_present_illness", "past_history",
+  "investigations", "course_in_hospital", "procedure_steps", "procedure_proposed",
+  "preop_diagnosis", "general_advice", "address",
+]);
+
 interface Props {
   fieldKey: string;
   label: string;
@@ -169,9 +178,11 @@ export default function FieldMic({ fieldKey, label, value, onChange, getSummary 
 
     if (!dictated) { resetBubble(); return; }
 
-    // ALWAYS APPEND: never erase existing field content
+    // Long narrative fields append; short single-value fields replace (re-dictating fixes
+    // a wrong value instead of concatenating "47 years 999 99 years").
     const existing    = valueRef.current.trim();
-    const textToClean = existing ? `${existing} ${dictated}` : dictated;
+    const shouldAppend = APPEND_FIELDS.has(fieldKey) && existing.length > 0;
+    const textToClean = shouldAppend ? `${existing} ${dictated}` : dictated;
 
     onChange(textToClean);          // commit raw immediately so nothing is lost
     setRawSnap(dictated);
