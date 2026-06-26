@@ -114,6 +114,16 @@ medical abbreviation, JOIN them. Expand to the full form in brackets the first t
 "CAD" → "CAD (Coronary Artery Disease)".
 `;
 
+// Short structured fields are REFORMATTED tightly (a date 5-word phrase becomes one
+// clean date). They must be exempt from the "don't get shorter" anti-summary guard,
+// which only applies to free-text narrative fields.
+const STRUCTURED_FIELDS = new Set([
+  "age", "sex", "ip_no", "date_of_admission", "date_of_discharge", "date_of_procedure",
+  "bp", "hr", "spo2", "temp", "payment_type",
+]);
+
+const DATE_FIELDS = new Set(["date_of_admission", "date_of_discharge", "date_of_procedure"]);
+
 export async function cleanField(
   rawText: string,
   fieldKey: string,
@@ -124,21 +134,42 @@ export async function cleanField(
   if (!apiKey) return rawText;
 
   const groq = new Groq({ apiKey });
-  const fieldGuide = FIELD_CONTEXT[fieldKey] ?? `A field labelled "${label}" in a hospital discharge summary.`;
+  let fieldGuide = FIELD_CONTEXT[fieldKey] ?? `A field labelled "${label}" in a hospital discharge summary.`;
 
-  // Cross-field context for consistency
+  // Extra-strict instruction for structured fields so the AI reformats instead of
+  // leaving voice junk like "10th class 7 class 2026".
+  if (DATE_FIELDS.has(fieldKey)) {
+    fieldGuide += " CRITICAL: output ONE date only, formatted exactly DD-Mon-YYYY (e.g. '04-Jul-2026'). " +
+      "Voice recognition mangles spoken dates ('4th of July 2026' may arrive as '10th class 7 class 2026' " +
+      "or '4 June 4/7/2026'). Interpret the intended day, month and year and output the single clean date. " +
+      "Ordinals: 1st→01, 2nd→02 ... Month numbers: 1→Jan, 7→Jul, 12→Dec. If the year is missing assume the current year. " +
+      "Return ONLY the date, nothing else.";
+  } else if (fieldKey === "age") {
+    fieldGuide += " Output ONLY the age, like '47 years' or '6 months'. Strip any duplicated/garbled numbers.";
+  } else if (fieldKey === "sex") {
+    fieldGuide += " Output exactly 'Male' or 'Female'. Nothing else.";
+  } else if (STRUCTURED_FIELDS.has(fieldKey)) {
+    fieldGuide += " Output ONLY the single clean value in the specified format — no extra words.";
+  }
+
+  // Cross-field context — gives the AI the full picture of THIS patient so it reasons
+  // about what value belongs in this field (e.g. age must be a number, not random words).
   let crossContext = "";
   if (currentSummary) {
     const parts: string[] = [];
-    if (currentSummary.name)      parts.push(`Patient name: ${currentSummary.name}`);
-    if (currentSummary.diagnosis) parts.push(`Diagnosis: ${currentSummary.diagnosis}`);
+    if (currentSummary.name)               parts.push(`Patient name: ${currentSummary.name}`);
+    if (currentSummary.age)                parts.push(`Age: ${currentSummary.age}`);
+    if (currentSummary.sex)                parts.push(`Sex: ${currentSummary.sex}`);
+    if (currentSummary.diagnosis)          parts.push(`Diagnosis: ${currentSummary.diagnosis}`);
+    if (currentSummary.chief_complaint)    parts.push(`Chief complaint: ${currentSummary.chief_complaint}`);
+    if (currentSummary.date_of_admission)  parts.push(`Admitted: ${currentSummary.date_of_admission}`);
     if (currentSummary.admitting_consultant) parts.push(`Consultant: ${currentSummary.admitting_consultant}`);
-    if (currentSummary.surgeon)   parts.push(`Surgeon: ${currentSummary.surgeon}`);
+    if (currentSummary.surgeon)            parts.push(`Surgeon: ${currentSummary.surgeon}`);
     if (currentSummary.treatment_given?.length) {
       const drugs = currentSummary.treatment_given.map(m => m.drug).filter(Boolean).join(", ");
       if (drugs) parts.push(`Drugs already recorded: ${drugs}`);
     }
-    if (parts.length) crossContext = `\nConsistency context (use same spellings):\n${parts.join("\n")}`;
+    if (parts.length) crossContext = `\nThis patient's other recorded details (for context & consistent spelling):\n${parts.join("\n")}`;
   }
 
   const completion = await groq.chat.completions.create({
@@ -165,13 +196,18 @@ export async function cleanField(
           "- 'one zero one' → '1-0-1', 'zero one zero' → '0-1-0', 'one one one' → '1-1-1'\n" +
           "- 'BP 130 by 80' → '130/80 mmHg', 'percent' → '%', 'degree' → '°'\n" +
           "- 'Inj' → 'Inj.', 'Tab' → 'Tab.', 'Cap' → 'Cap.', 'Syr' → 'Syr.'\n\n" +
-          "FORBIDDEN (these are critical failures):\n" +
+          "FORBIDDEN for free-text/narrative fields (Diagnosis, History, Complaint, Advice, etc.):\n" +
           "- DO NOT summarise or shorten. DO NOT add explanation or extra words.\n" +
           "- DO NOT rephrase into 'better' medical English. Keep the doctor's phrasing.\n" +
           "- DO NOT invent a diagnosis, drug, dose, or finding that wasn't said.\n" +
-          "- DO NOT reorder. DO NOT change numbers.\n" +
-          "- Return ONLY the corrected text — no quotes, no labels, no preamble.\n" +
-          "- If nothing is mis-heard, return the input character-for-character unchanged.",
+          "- DO NOT reorder. DO NOT change numbers.\n\n" +
+          "EXCEPTION — short structured fields (Age, Sex, Dates, BP, HR, SpO2, Temp, IP No):\n" +
+          "- These hold ONE clean value. Voice recognition often adds duplicate/garbled words.\n" +
+          "- Extract the single correct value and DISCARD the junk. '47 years 999 99 years' → '47 years'.\n" +
+          "- A Date field must output exactly one date as DD-Mon-YYYY. An Age field outputs only the age.\n\n" +
+          "ALWAYS:\n" +
+          "- Return ONLY the value — no quotes, no labels, no preamble.\n" +
+          "- For narrative fields, if nothing is mis-heard, return the input unchanged.",
       },
       // Few-shot: correct ONLY the mis-heard words, keep everything else identical
       {
@@ -196,10 +232,21 @@ export async function cleanField(
       { role: "assistant", content: "Known case of CAD (Coronary Artery Disease) and HTN (Hypertension) since five years" },
       {
         role: "user",
-        content: `Field: ${label}\n` +
-          `Field format: ${fieldGuide}\n` +
+        content: "Field: Date of Admission\nField format: output ONE date DD-Mon-YYYY.\n\nDoctor's dictation to correct:\n4 June 4/7/2026",
+      },
+      { role: "assistant", content: "04-Jul-2026" },
+      {
+        role: "user",
+        content: "Field: Age\nField format: output ONLY the age.\n\nDoctor's dictation to correct:\n47 years 999 99 years",
+      },
+      { role: "assistant", content: "47 years" },
+      {
+        role: "user",
+        content: `You are filling the "${label}" field of a discharge summary.\n` +
+          `What belongs in this field: ${fieldGuide}\n` +
           `${crossContext}\n\n` +
-          `Doctor's dictation to correct:\n${rawText}`,
+          `The doctor dictated the following for the "${label}" field. Output the correct value for THIS field only — ` +
+          `if voice recognition added words that don't belong in a "${label}" field, discard them:\n${rawText}`,
       },
     ],
   });
@@ -207,16 +254,25 @@ export async function cleanField(
   const raw = completion.choices[0]?.message?.content?.trim() ?? rawText;
   const cleaned = raw.replace(/^["'""«»`]+|["'""«»`]+$/g, "").trim();
 
-  // Safety net: a spell-checker output should be roughly the SAME length as the input.
-  // If the AI summarised (much shorter) OR padded/explained (much longer), it disobeyed —
-  // fall back to the doctor's raw words. Allow 20% shorter / 35% longer (shorthand can expand).
+  if (!cleaned) return rawText;
+
+  // Structured fields (dates, age, vitals) are SUPPOSED to shrink to one tight value —
+  // skip the length guard for them, just sanity-check the AI didn't return an essay.
+  if (STRUCTURED_FIELDS.has(fieldKey)) {
+    // Reject only if the AI rambled (structured values are short by nature)
+    if (cleaned.split(/\s+/).filter(Boolean).length > 8) return rawText;
+    return cleaned;
+  }
+
+  // Narrative fields: a spell-checker output should be ROUGHLY the same length as input.
+  // Reject summarising (much shorter) or padding/explaining (much longer) → keep raw words.
   const inputWords  = rawText.trim().split(/\s+/).filter(Boolean).length;
   const outputWords = cleaned.split(/\s+/).filter(Boolean).length;
-  if (inputWords > 0 && (outputWords < inputWords * 0.8 || outputWords > inputWords * 1.35)) {
+  if (inputWords > 0 && (outputWords < inputWords * 0.6 || outputWords > inputWords * 1.6)) {
     return rawText;
   }
 
-  return cleaned || rawText;
+  return cleaned;
 }
 
 // ─── Global autofill ─────────────────────────────────────────────────────────
