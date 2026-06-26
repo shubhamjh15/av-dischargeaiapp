@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DischargeSummary, EMPTY_SUMMARY, mergeSummary } from "@/lib/schema";
 import { downloadPdf } from "@/lib/pdf";
+import { DEMO_SUMMARY } from "@/lib/demoData";
 import DischargeForm from "./DischargeForm";
 import Dictation from "./Dictation";
 
@@ -171,6 +172,16 @@ export default function SummaryEditor({ id, initial }: Props) {
     }
   }
 
+  // One-tap demo: instantly fills every field with a complete sample patient.
+  // Fully local — no mic, no AI, no network. Guarantees a clean demo every time.
+  function loadDemo() {
+    setSummary(DEMO_SUMMARY);
+    setSavedOnce(false);
+    setRaw("");
+    flash("ok", "Demo patient loaded — every field filled. Scroll to review or download the PDF.", 5000);
+    document.getElementById("sec-patient")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   const { filled, total } = countFilled(summary);
   const pct = Math.round((filled / total) * 100);
 
@@ -187,15 +198,29 @@ export default function SummaryEditor({ id, initial }: Props) {
               Type or dictate the full case — AI structures every field
             </p>
           </div>
-          {!raw && (
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {/* One-tap demo — fills the whole form instantly, no mic/AI/network needed */}
             <button
               type="button"
-              onClick={() => setRaw("Patient Sachin Kumar C S, 31 year old male, IP 2627/00267, address 121 1st Main Kanaka Layout Bendre Nagar Bangalore. Admitted 3rd June 2026, discharged 8th June 2026, cash. Admitting consultant Dr Sathish Babu. Diagnosis right fracture humerus refracture with DCP insitu. Chief complaint slip and self fall at home on 1st June 2026 followed by fracture of right humerus. No known comorbidities. BP 130 by 80, HR 90, SpO2 98 percent on RA, temp normal, CVS S1 S2 present, RS bilateral air entry present, P/A soft and nontender. Treatment Inj Monocef 1gm IV one zero one, Inj Amikacin 500mg IV one zero one, Tab Limid 600mg one zero one. Discharge Tab Limid 600mg one zero one for 7 days, Tab Zerodol SP one zero one for 7 days. Review after 10 days with Dr Satish Babu.")}
-              className="shrink-0 rounded-xl border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--green)] transition hover:bg-[var(--mint-soft)]"
+              onClick={loadDemo}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--green)] px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-[var(--green-deep)]"
+              title="Instantly fill every field with a complete sample patient"
             >
-              Try sample
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              </svg>
+              Load demo patient
             </button>
-          )}
+            {!raw && (
+              <button
+                type="button"
+                onClick={() => setRaw("Patient Sachin Kumar C S, 31 year old male, IP 2627/00267, address 121 1st Main Kanaka Layout Bendre Nagar Bangalore. Admitted 3rd June 2026, discharged 8th June 2026, cash. Admitting consultant Dr Sathish Babu. Diagnosis right fracture humerus refracture with DCP insitu. Chief complaint slip and self fall at home on 1st June 2026 followed by fracture of right humerus. No known comorbidities. BP 130 by 80, HR 90, SpO2 98 percent on RA, temp normal, CVS S1 S2 present, RS bilateral air entry present, P/A soft and nontender. Treatment Inj Monocef 1gm IV one zero one, Inj Amikacin 500mg IV one zero one, Tab Limid 600mg one zero one. Discharge Tab Limid 600mg one zero one for 7 days, Tab Zerodol SP one zero one for 7 days. Review after 10 days with Dr Satish Babu.")}
+                className="rounded-xl border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--green)] transition hover:bg-[var(--mint-soft)]"
+              >
+                Try sample text
+              </button>
+            )}
+          </div>
         </div>
 
         <Dictation onAppend={(t) => setRaw((p) => (p + t).trimStart())} />
